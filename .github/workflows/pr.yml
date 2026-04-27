@@ -71,11 +71,22 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: sprino
+      - name: Checkout tessera (sibling repo for conformance fixtures)
+        uses: actions/checkout@v4
+        with:
+          repository: leotorrealba/tessera
+          path: tessera
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        working-directory: sprino
+        run: bun install --frozen-lockfile
       - name: Run database migrations
+        working-directory: sprino
         run: bun run db:migrate
       - name: Run tests
+        working-directory: sprino
         run: bun run test
