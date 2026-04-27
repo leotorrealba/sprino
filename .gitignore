@@ -1,0 +1,52 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code project state (per-machine, never commit)
+.claude/projects/
+.claude/sessions/
+.claude/cache/
+
+# Node / pnpm / bun
+node_modules/
+.pnpm-store/
+bun.lockb.bak
+
+# Build artifacts
+dist/
+build/
+.next/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Test
+coverage/
+*.lcov
+
+# Env & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Docker volume mounts
+postgres-data/
+*.dump
+
+# OS / shell
+*.pid
+*.seed
+*.pid.lock
