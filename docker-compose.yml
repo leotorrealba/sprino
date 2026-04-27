@@ -1,0 +1,63 @@
+# Sprino — Docker Compose
+#
+# Two profiles:
+#   - default (no profile): Postgres only, for local dev. Run alongside
+#     `bun --filter '@sprino/server' dev` on the host.
+#   - "full": Postgres + server + web. For week 7 self-host validation.
+#
+# Quick start (dev):    docker compose up -d
+# Self-host (week 7):   docker compose --profile full up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sprino-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sprino
+      POSTGRES_PASSWORD: sprino
+      POSTGRES_DB: sprino_dev
+    ports:
+      - "5433:5432"  # exposed on 5433 so it doesn't clash with brew postgresql@15 on 5432
+    volumes:
+      - sprino-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sprino -d sprino_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: sprino-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sprino:sprino@postgres:5432/sprino_dev
+      PORT: 3001
+      NODE_ENV: production
+      SPRINO_ACTORS_JSON: ${SPRINO_ACTORS_JSON}
+      SPRINO_DEFAULT_PROJECT_SLUG: sprino
+      SPRINO_DEFAULT_PROJECT_ID: 018c3e7a-0002-7000-8000-000000000001
+    ports:
+      - "3001:3001"
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: sprino-web
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "3000:3000"
+
+volumes:
+  sprino-postgres-data:
