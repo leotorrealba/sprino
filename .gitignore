@@ -12,6 +12,8 @@ Thumbs.db
 .claude/projects/
 .claude/sessions/
 .claude/cache/
+.claude/settings.local.json
+# (.claude/settings.json IS shared — keep that one in git when you add it)
 
 # Node / pnpm / bun
 node_modules/
