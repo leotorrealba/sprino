@@ -50,11 +50,11 @@ jobs:
     name: ts-test
     runs-on: ubuntu-latest
     env:
+      # DATABASE_URL is only used by the migrate step (creates tables).
+      # The test runner sets its own DATABASE_URL + SPRINO_ACTORS_JSON via
+      # apps/server/test/env-setup.ts, which is why we don't seed here.
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/sprino_test
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sprino_test
-      SPRINO_ACTORS_JSON: '[{"id":"actor_test_leo","kind":"human","display_name":"Test Leo","token":"test-leo-token"}]'
-      SPRINO_DEFAULT_PROJECT_ID: proj_test_default
-      SPRINO_DEFAULT_PROJECT_SLUG: test-default
     services:
       postgres:
         image: postgres:16-alpine
