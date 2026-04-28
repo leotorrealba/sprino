@@ -16,6 +16,7 @@
 
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuthVars } from '../src/auth/middleware.ts';
 
 const TWO_ACTORS = [
   {
@@ -159,11 +160,10 @@ describe('auth/middleware — tokenAuth (401 vs 403)', () => {
 
   function appWithAuth() {
     return import('../src/auth/middleware.ts').then(({ tokenAuth }) => {
-      const app = new Hono();
+      const app = new Hono<{ Variables: AuthVars }>();
       app.use('*', tokenAuth);
       app.get('/whoami', (c) => {
-        // biome-ignore lint/suspicious/noExplicitAny: hono ctx generics
-        const actor = (c as any).get('actor');
+        const actor = c.get('actor');
         return c.json({ id: actor.id, kind: actor.kind });
       });
       return app;
