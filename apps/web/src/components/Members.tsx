@@ -92,15 +92,12 @@ export function Members({ token }: Props) {
       });
       const body = (await r.json()) as
         | { actor: Actor; token: string }
-        | { _error: { details: { reason: string } } };
+        | { _error?: { details?: { reason?: string } } };
       if (!r.ok || !('actor' in body)) {
-        throw new Error(
-          'reason' in (body as { _error?: { details: { reason: string } } })
-            ._error!.details
-            ? (body as { _error: { details: { reason: string } } })._error
-                .details.reason
-            : `register failed: ${r.status}`,
-        );
+        const reason =
+          (body as { _error?: { details?: { reason?: string } } })._error
+            ?.details?.reason ?? `register failed: ${r.status}`;
+        throw new Error(reason);
       }
       setReveal({
         actor: body.actor,
@@ -163,12 +160,12 @@ export function Members({ token }: Props) {
       });
       const body = (await r.json()) as
         | { actor: Actor; token: string }
-        | { _error: { details: { reason: string } } };
+        | { _error?: { details?: { reason?: string } } };
       if (!r.ok || !('actor' in body)) {
-        throw new Error(
-          (body as { _error: { details: { reason: string } } })._error.details
-            .reason,
-        );
+        const reason =
+          (body as { _error?: { details?: { reason?: string } } })._error
+            ?.details?.reason ?? `rotate failed: ${r.status}`;
+        throw new Error(reason);
       }
       setReveal({
         actor: body.actor,
