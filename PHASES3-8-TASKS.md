@@ -1,17 +1,17 @@
-# Weeks 3-8 Task Breakdown — Multi-Agent Orchestration
+# Phases 3-8 Task Breakdown — Multi-Agent Orchestration
 
 **Status:** Ready for sub-agent dispatch  
-**Total streams:** 18 tasks across 6 weeks  
-**Parallelism:** 2-3 streams per week  
-**Merge pattern:** dependency-ordered per week  
+**Total streams:** 18 tasks across 6 phases  
+**Parallelism:** 2-3 streams per phase  
+**Merge pattern:** dependency-ordered per phase  
 
 ---
 
-## WEEK 3: Multi-actor + Activity Feed (3 parallel streams)
+## PHASE 3: Multi-actor + Activity Feed (3 parallel streams)
 
 ### Stream 3A: Multi-actor system
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week3-stream-a`  
+**Worktree:** `.claude/worktrees/phase3-stream-a`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
@@ -36,9 +36,9 @@ Parse `SPRINO_ACTORS_JSON` from env, validate schema, build per-actor token auth
 - None (independent)
 
 **Not in scope**
-- UI for actor switching (Week 3 Stream C)
-- Event attribution to actors (Week 3 Stream B)
-- Token rotation playbook (Week 7)
+- UI for actor switching (Phase 3 Stream C)
+- Event attribution to actors (Phase 3 Stream B)
+- Token rotation playbook (Phase 7)
 
 **Test command**
 ```bash
@@ -51,7 +51,7 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
 
 ### Stream 3B: Event log wiring
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week3-stream-b`  
+**Worktree:** `.claude/worktrees/phase3-stream-b`  
 **Estimated effort:** 5-6 hours  
 **Blocks:** Stream 3C (activity feed frontend needs events.list endpoint)
 
@@ -59,7 +59,7 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
 Wire append-only event log: every task mutation writes an event before updating materialized state. Events are the source of truth; task status is a projection.
 
 **Requirements**
-- Event schema (already in DB from Week 1): id, task_id, actor_id, kind ('created'|'status_changed'|'assigned'|...), payload (jsonb), operation_id, created_at
+- Event schema (already in DB from Phase 1): id, task_id, actor_id, kind ('created'|'status_changed'|'assigned'|...), payload (jsonb), operation_id, created_at
 - Task creation writes: INSERT task → INSERT event (same transaction, task INSERT first per FK constraint)
 - Task status update writes: INSERT event with status_changed kind + before/after in payload → UPDATE task.status
 - Event queries: `events.list(projectId, limit?, offset?)` returns paginated events
@@ -82,9 +82,9 @@ Wire append-only event log: every task mutation writes an event before updating 
 
 **Not in scope**
 - Frontend event rendering (Stream 3C)
-- Event filtering/search (Week 5)
-- Rich event formatting (Week 6 polish)
-- Realtime LISTEN/NOTIFY (Week 6)
+- Event filtering/search (Phase 5)
+- Rich event formatting (Phase 6 polish)
+- Realtime LISTEN/NOTIFY (Phase 6)
 
 **Test command**
 ```bash
@@ -96,11 +96,11 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test --
 
 ### Stream 3C: Activity feed frontend + events.list endpoint
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week3-stream-c`  
+**Worktree:** `.claude/worktrees/phase3-stream-c`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
-Build `/api/events` REST endpoint and React activity feed component. Poll every 2-3 seconds for now (SSE fallback deferred to Week 6).
+Build `/api/events` REST endpoint and React activity feed component. Poll every 2-3 seconds for now (SSE fallback deferred to Phase 6).
 
 **Requirements**
 - REST endpoint: `GET /api/events?project_id=<uuid>&limit=50&offset=0` returns paginated event list
@@ -130,9 +130,9 @@ Build `/api/events` REST endpoint and React activity feed component. Poll every 
 - **Can run parallel:** code to the mock API response while 3B is being built
 
 **Not in scope**
-- Real-time SSE (Week 6)
-- Event filtering UI (Week 5)
-- Rich event formatting, diffs (Week 6+)
+- Real-time SSE (Phase 6)
+- Event filtering UI (Phase 5)
+- Rich event formatting, diffs (Phase 6+)
 - Timestamps, timezones (defer)
 
 **Test command**
@@ -146,11 +146,11 @@ npm run test  # if vitest is wired for web
 
 ---
 
-## WEEK 4: Rich Agent Context + Concurrency (3 parallel streams)
+## PHASE 4: Rich Agent Context + Concurrency (3 parallel streams)
 
 ### Stream 4A: agent_context response field
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week4-stream-a`  
+**Worktree:** `.claude/worktrees/phase4-stream-a`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
@@ -163,8 +163,8 @@ Enrich `task.get()` response with structured agent context: related tasks, recen
     "task": { ... },
     "agent_context": {
       "related_tasks": [...],      // tasks blocking/blocked-by, up to 10
-      "recent_events": [...],       // last 20 events on this project (already added Week 3)
-      "repo_refs": [],              // placeholder for Week 5+
+      "recent_events": [...],       // last 20 events on this project (already added Phase 3)
+      "repo_refs": [],              // placeholder for Phase 5+
       "truncated": false,
       "next_page_tokens": null
     }
@@ -188,8 +188,8 @@ Enrich `task.get()` response with structured agent context: related tasks, recen
 - None (doesn't block other streams)
 
 **Not in scope**
-- Related tasks *detection* logic (blocking, blocked-by relationships) — use placeholder, expand Week 5+
-- Repo_refs population (Week 5+)
+- Related tasks *detection* logic (blocking, blocked-by relationships) — use placeholder, expand Phase 5+
+- Repo_refs population (Phase 5+)
 - SSE for agent_context updates
 
 **Test command**
@@ -202,14 +202,14 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test --
 
 ### Stream 4B: Optimistic concurrency (version + if_match)
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week4-stream-b`  
+**Worktree:** `.claude/worktrees/phase4-stream-b`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
 Implement optimistic locking: every task has a `version` integer. Mutations require `if_match: <version>`. On mismatch, return 409 Conflict with current task state.
 
 **Requirements**
-- Task schema: add `version: integer` column (already there from Week 1, ensure not nullable)
+- Task schema: add `version: integer` column (already there from Phase 1, ensure not nullable)
 - Version increments by 1 on every mutation (status change, assignment, etc.)
 - Mutating endpoints (PATCH /api/tasks/:id/status, etc.) require `if_match: <version>` in request body
 - On mismatch: return 409 Conflict with full current task in response body (so client can re-fetch and decide)
@@ -245,7 +245,7 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test --
 
 ### Stream 4C: Concurrency stress test
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week4-stream-c`  
+**Worktree:** `.claude/worktrees/phase4-stream-c`  
 **Estimated effort:** 3-4 hours  
 **Requires:** Streams 4A + 4B must merge first
 
@@ -288,7 +288,7 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test co
 
 ---
 
-## WEEK 5: Protocol v0.1 Milestone (2 parallel streams)
+## PHASE 5: Protocol v0.1 Milestone (2 parallel streams)
 
 ### Stream 5A: Spec stabilization
 **Owner:** Claude Opus Agent  
@@ -299,12 +299,12 @@ TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test co
 Freeze protocol schemas, document deprecation policy, publish v0.1.0 tag.
 
 **Requirements**
-- Review all JSON Schemas from weeks 1-4: task.create, task.get, task.update_status, actor, project, event, operation
+- Review all JSON Schemas from phases 1-4: task.create, task.get, task.update_status, actor, project, event, operation
 - Lock schemas (no breaking changes during v0.1.x)
 - Add SPEC.md sections:
   - Versioning: semver policy (breaking = major, additive = minor/patch)
   - Deprecation: 90-day notice period before breaking changes
-  - Migration guide template: how v0.0.x → v0.1.x (mostly additive, no breaking changes week 1-4)
+  - Migration guide template: how v0.0.x → v0.1.x (mostly additive, no breaking changes phase 1-4)
   - Conformance: reference implementation must pass all fixtures
 - Update README in tessera/ repo
 - Create CHANGELOG.md: summarize what changed from v0.0.1 → v0.1.0
@@ -365,11 +365,11 @@ Expand conformance fixtures to cover all verbs and edge cases. Reference impl (S
 
 ---
 
-## WEEK 6: Buffer + Hardening (3 parallel streams)
+## PHASE 6: Buffer + Hardening (3 parallel streams)
 
 ### Stream 6A: Backup/restore workflow
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week6-stream-a`  
+**Worktree:** `.claude/worktrees/phase6-stream-a`  
 **Estimated effort:** 3-4 hours  
 
 **Goal:**  
@@ -403,7 +403,7 @@ Implement nightly `pg_dump` cron and restoration playbook. Tested end-to-end.
 
 ### Stream 6B: Resource limits + pagination
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week6-stream-b`  
+**Worktree:** `.claude/worktrees/phase6-stream-b`  
 **Estimated effort:** 3-4 hours  
 
 **Goal:**  
@@ -431,13 +431,13 @@ Add rate limits and pagination guards. Prevent runaway queries (e.g., someone re
 
 **Not in scope**
 - User-configurable limits
-- Rate limiting by token (Week 7+)
+- Rate limiting by token (Phase 7+)
 
 ---
 
 ### Stream 6C: Realtime fallback (SSE failover to polling)
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week6-stream-c`  
+**Worktree:** `.claude/worktrees/phase6-stream-c`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
@@ -465,17 +465,17 @@ If SSE connection drops, fall back to polling at 10s interval. Activity feed sta
 - None (independent)
 
 **Not in scope**
-- Postgres LISTEN/NOTIFY (deferred to Week 6 originally; still deferred if time-tight)
+- Postgres LISTEN/NOTIFY (deferred to Phase 6 originally; still deferred if time-tight)
 - WebSocket upgrade (defer to v0.2)
 - Multiple simultaneous SSE clients (PoC single-user)
 
 ---
 
-## WEEK 7: Self-host Packaging + External Test (2 parallel streams)
+## PHASE 7: Self-host Packaging + External Test (2 parallel streams)
 
 ### Stream 7A: Docker Compose setup + bootstrap.sh
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week7-stream-a`  
+**Worktree:** `.claude/worktrees/phase7-stream-a`  
 **Estimated effort:** 4-5 hours  
 
 **Goal:**  
@@ -493,7 +493,7 @@ Package everything for 30-min self-host: `docker compose up` brings up working S
   - Seeds one actor (the admin human)
   - Creates one project (sprino)
   - Prints: "Sprino ready at http://localhost:3000, token: ..."
-- Dockerfiles already exist (Week 1-4); update for consistency
+- Dockerfiles already exist (Phase 1-4); update for consistency
 - .env.example updated with all required vars
 - Affected modules: `docker-compose.yml`, `bootstrap.sh`, `Dockerfile.server`, `Dockerfile.web`, `.env.example`
 
@@ -518,7 +518,7 @@ Package everything for 30-min self-host: `docker compose up` brings up working S
 
 ### Stream 7B: Documentation + token rotation playbook
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week7-stream-b`  
+**Worktree:** `.claude/worktrees/phase7-stream-b`  
 **Estimated effort:** 3-4 hours  
 
 **Goal:**  
@@ -538,8 +538,8 @@ Document everything for external user self-hosting. Clear 30-min walkthrough.
   - Restart backend (`docker compose restart backend`)
   - Tokens take effect immediately
   - Old operations still valid (30-day retention)
-- `docs/RESTORE.md`: restore from backup (already written in Week 6A)
-- `CHANGELOG.md` (Sprino): summarize week 7 changes
+- `docs/RESTORE.md`: restore from backup (already written in Phase 6A)
+- `CHANGELOG.md` (Sprino): summarize phase 7 changes
 - Affected modules: `README.md`, `docs/TOKEN-ROTATION.md`, `docs/RESTORE.md`, `CHANGELOG.md`
 
 **Success Criteria**
@@ -554,17 +554,17 @@ Document everything for external user self-hosting. Clear 30-min walkthrough.
 - **Can run in parallel:** documentation doesn't block anything
 
 **Not in scope**
-- Video tutorials (Week 8+)
+- Video tutorials (Phase 8+)
 - Troubleshooting guide (defer to v0.2)
 - Kubernetes docs
 
 ---
 
-## WEEK 8: Open Source Release (2 parallel streams)
+## PHASE 8: Open Source Release (2 parallel streams)
 
 ### Stream 8A: Licensing + open source prep
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week8-stream-a`  
+**Worktree:** `.claude/worktrees/phase8-stream-a`  
 **Estimated effort:** 3-4 hours  
 
 **Goal:**  
@@ -603,14 +603,14 @@ Apply AGPL v3 to Sprino, finalize MIT on Tessera, prepare for public release.
 
 ### Stream 8B: Release notes + announcement draft
 **Owner:** Claude Opus Agent  
-**Worktree:** `.claude/worktrees/week8-stream-b`  
+**Worktree:** `.claude/worktrees/phase8-stream-b`  
 **Estimated effort:** 3-4 hours  
 
 **Goal:**  
 Document what shipped, why it matters, how to get started. Draft announcement.
 
 **Requirements**
-- `CHANGELOG.md` (Sprino): summarize weeks 1-8
+- `CHANGELOG.md` (Sprino): summarize phases 1-8
   - What shipped: tasks, projects, events, actors, MCP, web UI, Docker, protocol
   - Breaking changes: none (v0 → v0 is pre-release)
   - Performance: baseline numbers if measured
@@ -644,30 +644,30 @@ Document what shipped, why it matters, how to get started. Draft announcement.
 ## Dependency Graph
 
 ```
-WEEK 3:
+PHASE 3:
   3A (auth) ──────────┐
                       ├─→ 3B (events) ──→ 3C (feed frontend)
                       └──────────────────→ 3C (feed frontend)
 
-WEEK 4:
+PHASE 4:
   4A (agent_context) ─┐
                       ├─→ 4C (stress test)
   4B (version) ───────┘
 
-WEEK 5:
+PHASE 5:
   5A (spec lock) ──→ 5B (conformance)
 
-WEEK 6:
+PHASE 6:
   6A (backup) ─┐
               ├─→ (independent, merge in any order)
   6B (limits) ─┤
               ├─→
   6C (SSE) ────┘
 
-WEEK 7:
+PHASE 7:
   7A (docker) ──→ 7B (docs)
 
-WEEK 8:
+PHASE 8:
   8A (license) ──→ 8B (announcement)
 ```
 
@@ -675,24 +675,24 @@ WEEK 8:
 
 ## Merge & Release Process
 
-### Per-week merge checklist (Friday EOD)
+### Per-phase merge checklist (Friday EOD)
 
 ```bash
 #!/bin/bash
 set -e
-WEEK=$1  # pass "3", "4", etc.
+PHASE=$1  # pass "3", "4", etc.
 
-echo "=== WEEK $WEEK MERGE & RELEASE ==="
+echo "=== PHASE $PHASE MERGE & RELEASE ==="
 cd /Users/leotorrealba/Development/Sprino
 
 # Merge order: follow dependency graph
-case $WEEK in
-  3) STREAMS=("week3-stream-a" "week3-stream-b" "week3-stream-c") ;;
-  4) STREAMS=("week4-stream-a" "week4-stream-b" "week4-stream-c") ;;
-  5) STREAMS=("week5-stream-a" "week5-stream-b") ;;
-  6) STREAMS=("week6-stream-a" "week6-stream-b" "week6-stream-c") ;;
-  7) STREAMS=("week7-stream-a" "week7-stream-b") ;;
-  8) STREAMS=("week8-stream-a" "week8-stream-b") ;;
+case $PHASE in
+  3) STREAMS=("phase3-stream-a" "phase3-stream-b" "phase3-stream-c") ;;
+  4) STREAMS=("phase4-stream-a" "phase4-stream-b" "phase4-stream-c") ;;
+  5) STREAMS=("phase5-stream-a" "phase5-stream-b") ;;
+  6) STREAMS=("phase6-stream-a" "phase6-stream-b" "phase6-stream-c") ;;
+  7) STREAMS=("phase7-stream-a" "phase7-stream-b") ;;
+  8) STREAMS=("phase8-stream-a" "phase8-stream-b") ;;
 esac
 
 # Merge each stream
@@ -707,20 +707,20 @@ echo "Running integration tests..."
 TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test bun test
 
 # Tag release
-TAG="v0.0.$WEEK"
+TAG="v0.0.$PHASE"
 git tag "$TAG"
 git push origin "$TAG"
 echo "Tagged $TAG"
 
 # Cleanup
-echo "=== WEEK $WEEK COMPLETE ==="
+echo "=== PHASE $PHASE COMPLETE ==="
 ```
 
 ### Release cadence
 
-- **Tags:** `v0.0.3` (end of week 3), `v0.0.4`, ..., `v0.1.0` (end of week 8)
+- **Tags:** `v0.0.3` (end of phase 3), `v0.0.4`, ..., `v0.1.0` (end of phase 8)
 - **Docker images:** Tag GHCR image with version on each tag
-- **Protocol:** Tessera v0.1.0 tagged in week 5, referenced from week 8 release
+- **Protocol:** Tessera v0.1.0 tagged in phase 5, referenced from phase 8 release
 
 ---
 
@@ -729,7 +729,7 @@ echo "=== WEEK $WEEK COMPLETE ==="
 ### For each stream, send this template to the sub-agent:
 
 ```
-You are assigned Stream [N] for Week [W]. 
+You are assigned Stream [N] for Phase [W]. 
 
 TASK: [goal from above]
 
@@ -750,7 +750,7 @@ TEST COMMAND:
 
 CONTEXT:
 - You're working in worktree .claude/worktrees/[name]
-- When done, commit your changes with: git commit -m "feat: [stream name] — week [W]"
+- When done, commit your changes with: git commit -m "feat: [stream name] — phase [W]"
 - Push to origin: git push
 - Notify me when ready to merge
 
@@ -761,10 +761,10 @@ START CODING.
 
 ## Status Tracking
 
-Print this template weekly to track progress:
+Print this template per phase to track progress:
 
 ```
-WEEK 3 STATUS
+PHASE 3 STATUS
 ─────────────
 Stream 3A (auth):        [ ] assigned [ ] in progress [ ] done
 Stream 3B (events):      [ ] assigned [ ] in progress [ ] done
@@ -774,19 +774,19 @@ Integration test:        [ ] passing
 v0.0.3 tagged:           [ ] yes
 Dogfood verified:        [ ] yes
 
-NEXT: Merge complete, start week 4 streams Monday
+NEXT: Merge complete, start phase 4 streams
 ```
 
 ---
 
 ## Notes
 
-- **Reuse this file for weeks 3-8.** Copy the template per stream, send to agents with their specific task.
+- **Reuse this file for phases 3-8.** Copy the template per stream, send to agents with their specific task.
 - **Watch dependencies.** If Stream 3A is late, 3B can code in parallel (but will need to mock actor_id). Only the merge waits.
 - **Halfway-by-Wednesday rule:** If a stream is <50% done by EOD Wednesday, drop lowest-priority sub-item and ship the rest.
-- **External user (Week 7):** Line up your external tester by week 4 EOD. Ask them: "Can I send you a test instance in 3 weeks?"
-- **Dogfood journal (Week 4 & 6):** Schedule 30min Friday EOD weeks 4 and 6 to write honest assessment: what worked, what didn't, any surprises.
+- **External user (Phase 7):** Line up your external tester by phase 4 EOD. Ask them: "Can I send you a test instance in 3 weeks?"
+- **Dogfood journal (Phase 4 & 6):** Schedule 30min Friday EOD phases 4 and 6 to write honest assessment: what worked, what didn't, any surprises.
 
 ---
 
-*Generated for Week 1-2 completion → Weeks 3-8 multi-agent execution*
+*Generated for Phase 1-2 completion → Phases 3-8 multi-agent execution*
