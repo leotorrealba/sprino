@@ -352,7 +352,7 @@ export async function listTasks(
     .select()
     .from(tasks)
     .where(eq(tasks.projectId, args.req.project_id))
-    .orderBy(asc(tasks.createdAt))
+    .orderBy(asc(tasks.createdAt), asc(tasks.id))
     .limit(limit)
     .offset(offset);
   return { tasks: rows.map(rowToTask) };
