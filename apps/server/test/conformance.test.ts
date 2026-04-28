@@ -451,12 +451,14 @@ describe('Tessera v0.0.2 project scoping', () => {
 });
 
 /**
- * Tessera v0.1.1 conformance: replay the new error and edge-case fixtures
+ * Tessera v0.1.1 conformance: exercise the new error and edge-case coverage
  * shipped in the v0.1.0 stabilization milestone (with v0.1.1's _error.code
- * alignment). Each fixture is loaded from `tessera/conformance/fixtures/`,
- * the request is replayed against the live server, and the response is
- * asserted to match the fixture's `_error` envelope (status + code) per the
- * strict-match contract documented in `tessera/conformance/README.md`.
+ * alignment). Most cases replay request fixtures loaded from
+ * `tessera/conformance/fixtures/` against the live server and assert the
+ * response matches the fixture contract; stateful edge-case flows may be
+ * composed in-code when they require runtime ids or multi-step setup, while
+ * still following the strict-match rules documented in
+ * `tessera/conformance/README.md`.
  */
 describe('Tessera v0.1.1 conformance — new fixtures', () => {
   it('task-create-operation-replay returns the same task and event ids as the first call', async () => {
@@ -617,19 +619,18 @@ describe('Tessera v0.1.1 conformance — new fixtures', () => {
     for (let i = 0; i < 20; i++) {
       const next = prevStatus === 'todo' ? 'doing' : 'todo';
       const flipResp = await app.fetch(
-        new Request(`http://test/api/tasks/${taskId}/status`, {
-          method: 'PATCH',
-          headers: {
-            authorization: `Bearer ${FIXTURE_TOKEN}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            operation_id: `018c3e7a-0009-7000-8000-${i.toString(16).padStart(12, '0')}`,
-            status: next,
-            if_match: i + 1,
-            notes: heavyNotes,
-          }),
-        }),
+        new Request(
+          `http://test/api/tasks/${taskId}/status`,
+          bearer(
+            {
+              operation_id: `018c3e7a-0009-7000-8000-${i.toString(16).padStart(12, '0')}`,
+              status: next,
+              if_match: i + 1,
+              notes: heavyNotes,
+            },
+            'PATCH',
+          ),
+        ),
       );
       expect(flipResp.status).toBe(200);
       prevStatus = next;
