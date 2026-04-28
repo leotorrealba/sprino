@@ -20,6 +20,7 @@ import { Hono } from 'hono';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import {
+  EventListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
@@ -30,6 +31,7 @@ import {
   getProject,
   listProjects,
 } from '../../service/projects.ts';
+import { listEvents } from '../../service/events.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -148,6 +150,32 @@ export function buildHttpRoutes(): Hono<Env> {
         req,
         actorId: actor.id,
       });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific activity feed endpoint — see service/events.ts.
+  // Project-scoped event log with denormalized actor + task fields. Not
+  // exposed via /mcp; agents read events through task.get's recent_events.
+  api.get('/events', async (c) => {
+    try {
+      const limitRaw = c.req.query('limit');
+      const offsetRaw = c.req.query('offset');
+      const req = EventListReqSchema.parse({
+        project_id: c.req.query('project_id'),
+        task_id: c.req.query('task_id') || undefined,
+        limit:
+          limitRaw !== undefined && /^\d+$/.test(limitRaw)
+            ? Number(limitRaw)
+            : undefined,
+        offset:
+          offsetRaw !== undefined && /^\d+$/.test(offsetRaw)
+            ? Number(offsetRaw)
+            : undefined,
+      });
+      const res = await listEvents(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);

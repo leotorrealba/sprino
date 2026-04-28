@@ -80,6 +80,22 @@ export const EventSchema = z.object({
 });
 export type Event = z.infer<typeof EventSchema>;
 
+// Event with denormalized actor + task fields for the activity feed.
+// The activity feed renders "Leo (human) marked Task 'fix bug' as done"
+// — having display_name and task title inline avoids N+1 lookups in the UI.
+export const EventWithActorSchema = EventSchema.extend({
+  actor: z.object({
+    id: uuid,
+    display_name: z.string(),
+    kind: z.enum(['human', 'agent']),
+  }),
+  task: z.object({
+    id: uuid,
+    title: z.string(),
+  }),
+});
+export type EventWithActor = z.infer<typeof EventWithActorSchema>;
+
 export const RepoRefSchema = z.object({
   kind: z.enum(['commit', 'branch', 'pr', 'file', 'issue']),
   ref: z.string(),
@@ -141,6 +157,14 @@ export const TaskUpdateStatusReqSchema = z.object({
 });
 export type TaskUpdateStatusReq = z.infer<typeof TaskUpdateStatusReqSchema>;
 
+export const EventListReqSchema = z.object({
+  project_id: uuid,
+  task_id: uuid.optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).optional(),
+});
+export type EventListReq = z.infer<typeof EventListReqSchema>;
+
 // ────────────────────────────────────────────────────────────────────────
 // Verbs — response shapes
 // ────────────────────────────────────────────────────────────────────────
@@ -173,3 +197,8 @@ export const TaskUpdateStatusResSchema = z.object({
   event: EventSchema,
 });
 export type TaskUpdateStatusRes = z.infer<typeof TaskUpdateStatusResSchema>;
+
+export const EventListResSchema = z.object({
+  events: z.array(EventWithActorSchema),
+});
+export type EventListRes = z.infer<typeof EventListResSchema>;
