@@ -69,6 +69,14 @@ docker compose --profile full down       # stop, keep data
 docker compose --profile full down -v    # stop, wipe Postgres volume
 ```
 
+### Learn more
+
+- **New here?** Read [`docs/EXPLAINED.md`](./docs/EXPLAINED.md) — Sprino
+  in plain English, no jargon.
+- **Want the engineering details?** Read
+  [`docs/TECHNICAL.md`](./docs/TECHNICAL.md) — architecture, data model,
+  request flow, and operational concerns.
+
 ### Day-2 docs
 
 - **Backups & disaster recovery:** [`docs/RESTORE.md`](./docs/RESTORE.md)
