@@ -22,7 +22,7 @@
  *     + actor_tokens.
  */
 
-import { and, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, isNull, notInArray } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from './client.ts';
 import { actors, actorTokens } from './schema.ts';
@@ -152,9 +152,3 @@ export async function seedFromEnv(
 
   return { importedActors, newTokens, revokedRemoved };
 }
-
-// Silence unused-import lint when nothing in this file references inArray
-// or sql directly (Drizzle's type-only export of `inArray` keeps the path
-// open for follow-up batched ops without churn).
-void inArray;
-void sql;
