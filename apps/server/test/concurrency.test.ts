@@ -87,7 +87,7 @@ describe('concurrency: 4 actors, 4 different target statuses', () => {
     const { id: taskId, version } = await createOneTask();
     expect(version).toBe(1);
 
-    const t0 = Date.now();
+    const t0 = performance.now();
     const results = await Promise.allSettled(
       allActorIds.map((actorId, i) =>
         updateTaskStatus(db, {
@@ -103,7 +103,7 @@ describe('concurrency: 4 actors, 4 different target statuses', () => {
         }),
       ),
     );
-    const elapsedMs = Date.now() - t0;
+    const elapsedMs = performance.now() - t0;
 
     // Spec: total runtime <5s. Postgres FOR UPDATE serializes the four
     // contenders, so this is a sanity check that the lock isn't held
