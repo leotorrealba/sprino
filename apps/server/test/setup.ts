@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * Test setup: spin up the Hono app against a real Postgres, with a clean
  * schema reset before each test.

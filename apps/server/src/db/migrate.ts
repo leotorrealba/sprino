@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * Drizzle migration runner. Run with:
  *   bun --filter '@sprino/server' db:migrate

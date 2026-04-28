@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * MCP-over-HTTP adapter — minimal JSON-RPC 2.0 dispatch on POST /mcp.
  *

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * MUST be the first vitest setupFile. Pure env mutation, no imports — that
  * way ES-module hoisting can't reorder it after a transitive import of
