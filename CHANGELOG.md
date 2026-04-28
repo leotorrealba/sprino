@@ -35,12 +35,18 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
   IDs before the transaction and uses a conditional UPDATE that throws
   `ConcurrentRotationError` if another caller won the race.
 - `actor.register` responses are **redacted in the idempotency cache**:
-  the persisted `operations.response_body` carries only the actor row
-  and a `_token_redacted: true` flag, never the plaintext. Replays of
-  the same `operation_id` return `{ actor, token: null, replayed: true }`.
-- Last-admin guard: revoking or rotating the only active human admin
-  token returns `409 last_admin_protected` so an operator cannot lock
-  themselves out by accident.
+  the persisted `operations.response_body` carries only the `actor`
+  field — no `token`, no flag of any kind. Replays of the same
+  `operation_id` return that same `{ actor }` shape (no `token`),
+  preserving "the plaintext is shown exactly once" as a hard
+  invariant. Callers that lost the plaintext must `actor.revoke_token`
+  and re-register.
+- Last-admin guard: revoking the only active human admin token returns
+  `409 last_admin_protected` so an operator cannot lock themselves out
+  by accident. `rotateToken` does not need this guard because rotate
+  is atomic revoke+insert in one transaction — the actor still ends
+  with one active token, so the system-wide active-human count is
+  preserved by construction.
 
 ### Fixed
 - `docs/TOKEN-ROTATION.md` updated to describe the v0.0.9 split: db
