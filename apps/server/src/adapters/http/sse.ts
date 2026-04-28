@@ -22,7 +22,7 @@
 import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
 import type { Db } from '../../db/client.ts';
-import { listEventsAfter } from '../../service/events.ts';
+import { listEventsAfter, latestEventId } from '../../service/events.ts';
 import {
   StreamTicketError,
   verifyStreamTicket,
@@ -79,51 +79,61 @@ export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
     };
     abortSignal.addEventListener('abort', onAbort);
 
-    // Initial replay if the client provided a cursor.
-    if (cursor) {
-      const replay = await listEventsAfter(db, {
-        projectId,
-        afterEventId: cursor,
-        limit: REPLAY_LIMIT,
-      });
-      for (const ev of replay) {
-        if (aborted || stream.closed) break;
-        await stream.writeSSE({ id: ev.id, data: JSON.stringify(ev) });
-        cursor = ev.id;
-      }
-    }
-
-    let lastHeartbeat = Date.now();
-    // Initial heartbeat so the client knows the connection is live.
-    // Use an SSE comment (`:` prefix) — clients ignore comments but they
-    // flush proxy buffers and let the browser fire the EventSource `open`
-    // event without an empty `data:` message.
-    await stream.write(': ping\n\n').catch(() => undefined);
-
-    while (!aborted && !stream.closed) {
-      try {
-        const fresh = await listEventsAfter(db, {
+    try {
+      // Initial replay if the client provided a cursor.
+      if (cursor) {
+        const replay = await listEventsAfter(db, {
           projectId,
           afterEventId: cursor,
           limit: REPLAY_LIMIT,
         });
-        for (const ev of fresh) {
+        for (const ev of replay) {
           if (aborted || stream.closed) break;
           await stream.writeSSE({ id: ev.id, data: JSON.stringify(ev) });
           cursor = ev.id;
         }
-        const now = Date.now();
-        if (now - lastHeartbeat >= HEARTBEAT_MS) {
-          await stream.write(': ping\n\n');
-          lastHeartbeat = now;
-        }
-      } catch {
-        // Database hiccup — sleep and retry. The stream stays open so the
-        // client doesn't need to reconnect on transient errors.
+      } else {
+        // No cursor (e.g. an empty-feed initial REST load): snapshot the
+        // current tail so subsequent events are picked up. Without this,
+        // `listEventsAfter` would short-circuit on null forever and the
+        // client would never receive a live event.
+        cursor = await latestEventId(db, projectId);
       }
-      await stream.sleep(POLL_MS);
-    }
 
-    abortSignal.removeEventListener('abort', onAbort);
+      let lastHeartbeat = Date.now();
+      // Initial heartbeat so the client knows the connection is live.
+      // Use an SSE comment (`:` prefix) — clients ignore comments but they
+      // flush proxy buffers and let the browser fire the EventSource `open`
+      // event without an empty `data:` message.
+      await stream.write(': ping\n\n').catch(() => undefined);
+
+      while (!aborted && !stream.closed) {
+        try {
+          const fresh = await listEventsAfter(db, {
+            projectId,
+            afterEventId: cursor,
+            limit: REPLAY_LIMIT,
+          });
+          for (const ev of fresh) {
+            if (aborted || stream.closed) break;
+            await stream.writeSSE({ id: ev.id, data: JSON.stringify(ev) });
+            cursor = ev.id;
+          }
+          const now = Date.now();
+          if (now - lastHeartbeat >= HEARTBEAT_MS) {
+            await stream.write(': ping\n\n');
+            lastHeartbeat = now;
+          }
+        } catch {
+          // Database hiccup — sleep and retry. The stream stays open so the
+          // client doesn't need to reconnect on transient errors.
+        }
+        await stream.sleep(POLL_MS);
+      }
+    } finally {
+      // Always remove the abort listener — covers early throws from the
+      // initial replay / latestEventId / heartbeat write paths.
+      abortSignal.removeEventListener('abort', onAbort);
+    }
   });
 }

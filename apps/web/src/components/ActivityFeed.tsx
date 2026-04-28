@@ -156,8 +156,14 @@ export function ActivityFeed({ token, projectId }: ActivityFeedProps) {
     let ticket: string;
     try {
       ticket = await fetchTicket();
-    } catch {
-      // Ticket fetch failed — stay in polling mode.
+    } catch (e) {
+      if (cancelledRef.current) return;
+      setError(
+        e instanceof Error ? e.message : 'Unable to connect to live updates.',
+      );
+      // Ticket fetch failed — fall back to polling so the user still gets
+      // updates instead of a stuck "connecting…" indicator.
+      startPolling();
       return;
     }
     if (cancelledRef.current) return;

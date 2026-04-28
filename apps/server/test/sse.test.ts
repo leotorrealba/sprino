@@ -247,10 +247,9 @@ describe('Phase 6C — SSE stream replay + headers', () => {
 
   it('emits SSE-formatted replay for events newer than last_event_id', async () => {
     // Seed 3 tasks (each generates a "created" event).
-    const eventIds: string[] = [];
     for (let i = 0; i < 3; i += 1) {
       const op = `06b3a000-0000-7000-8000-${String(i).padStart(12, '0')}`;
-      const out = await createTask(db, {
+      await createTask(db, {
         actorId: FIXTURE_ACTOR_ID,
         req: {
           project_id: FIXTURE_PROJECT_ID,
@@ -258,12 +257,9 @@ describe('Phase 6C — SSE stream replay + headers', () => {
           operation_id: op,
         },
       });
-      // The event id matches the task creation event; pull it via raw SQL
-      // would be ideal but listEvents returns it cleanly in desc order.
-      eventIds.push(out.task.id);
     }
 
-    // Get the actual event ids in ascending order via a service call.
+    // Pull the actual event ids in ascending order via a service call.
     const { listEvents } = await import('../src/service/events.ts');
     const allEvents = await listEvents(db, {
       req: { project_id: FIXTURE_PROJECT_ID, limit: 50 },

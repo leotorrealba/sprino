@@ -151,3 +151,27 @@ export async function listEventsAfter(
     task: { id: r.task_id, title: r.task_title },
   }));
 }
+
+/**
+ * Returns the most-recent event id for `projectId`, or `null` if the
+ * project has no events yet.
+ *
+ * Used by the SSE handler when a client connects WITHOUT a `last_event_id`
+ * cursor: we snapshot the current tail at open time and stream from there
+ * forward. Without this, an empty-feed connection's cursor would stay null
+ * forever and `listEventsAfter` (which short-circuits on null) would never
+ * deliver new events to that client.
+ */
+export async function latestEventId(
+  db: Db,
+  projectId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ id: events.id })
+    .from(events)
+    .innerJoin(tasks, eq(events.taskId, tasks.id))
+    .where(eq(tasks.projectId, projectId))
+    .orderBy(desc(events.createdAt), desc(events.id))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
