@@ -361,16 +361,25 @@ the check.
 **Idempotency redaction.** `actor.register` is idempotent on
 `operation_id`, like every other Tessera write verb. To avoid leaking
 plaintext tokens through the idempotency cache, the service writes a
-redacted body to `operations.response_body` (`{ actor, _token_redacted:
-true }`). Replays return `{ actor, token: null, replayed: true }` —
-the caller must have saved the plaintext on the first response.
+redacted body — just `{ actor }`, with no `token` field — to
+`operations.response_body`. On a same-`operation_id` replay (whether
+through `checkIdempotency` or the post-INSERT race fallback), the
+caller gets back that same `{ actor }` shape. The plaintext token is
+returned exactly once — on the original successful call — and is
+never recoverable from the database. A caller that lost it must call
+`actor.revoke_token` and re-register.
 
-**Last-admin guard.** `revokeToken` and `rotateToken` both check
-whether the actor is the only active human admin and refuse with
-`409 last_admin_protected`. Env-source actors are also rejected
-(`409 env_actor_immutable`) — operators rotate them by editing
-`.env` and restarting, which is the documented break-glass path
-(`docs/TOKEN-RECOVERY.md`).
+**Last-admin guard.** `revokeToken` checks whether the actor is the
+only human with an active token and refuses with `409
+last_admin_protected` — that's the path that could leave the system
+without an admin credential. `rotateToken` does **not** need this
+guard because rotate is atomic revoke + insert in a single
+transaction: the actor still ends with one active token after the
+call, so the system-wide active-human count is preserved. Env-source
+actors are rejected by both verbs with `400 operation_unsupported`
+(error class `EnvActorImmutableError`) — operators rotate them by
+editing `.env` and restarting, which is the documented break-glass
+path (`docs/TOKEN-RECOVERY.md`).
 
 ---
 
