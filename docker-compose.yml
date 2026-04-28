@@ -1,12 +1,21 @@
 # Sprino — Docker Compose
 #
-# Two profiles:
+# Profiles:
 #   - default (no profile): Postgres only, for local dev. Run alongside
 #     `bun --filter '@sprino/server' dev` on the host.
-#   - "full": Postgres + server + web. For week 7 self-host validation.
+#   - "full": Postgres + server + web + backup sidecar. For phase 7
+#     self-host validation. The backup sidecar is intentionally bundled
+#     into `full` so a self-hosted deploy gets nightly backups by default
+#     — operators who want to opt out can pass `--scale backup=0`.
+#   - "backup": just the backup sidecar (combine with default to attach
+#     it to a Postgres-only stack: `docker compose --profile backup up -d`).
+#
+# Backups are off by default in plain `docker compose up -d` to keep dev
+# lightweight; they only run when one of the two profiles above is active.
 #
 # Quick start (dev):    docker compose up -d
 # Self-host (week 7):   docker compose --profile full up -d
+# With backups:         docker compose --profile full --profile backup up -d
 
 services:
   postgres:
@@ -59,6 +68,30 @@ services:
       - server
     ports:
       - "3000:3000"
+
+  backup:
+    profiles: ["backup", "full"]
+    image: postgres:16-alpine
+    container_name: sprino-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: sprino
+      PGPASSWORD: sprino
+      PGDATABASE: sprino_dev
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-30}
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-0}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./scripts/backup-entrypoint.sh:/usr/local/bin/backup-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-entrypoint.sh"]
 
 volumes:
   sprino-postgres-data:
