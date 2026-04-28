@@ -6,7 +6,7 @@ opaque bearer tokens. In the v0.x self-hosted setup, tokens live in the
 start. This document is the playbook for replacing one of those tokens.
 
 > **Audience.** Whoever runs the Sprino instance. If you can edit `.env`
-> and run `docker compose restart`, you can rotate a token.
+> and recreate a Compose service, you can rotate a token.
 
 ## Why rotate
 
@@ -84,13 +84,21 @@ token from step 1. Leave every other field — `id`, `kind`,
 > into `.env`. The value MUST be on a single line wrapped in single
 > quotes — dotenv does not understand multi-line values here.
 
-### 3. Restart the server
+### 3. Recreate the server container
 
 ```sh
-docker compose restart server
+docker compose up -d --no-deps --force-recreate server
 ```
 
-The server container re-reads `.env` on boot, so the new token is now
+> **Why not `docker compose restart server`?** Compose interpolates
+> values from `.env` into a service's environment **at container
+> creation time**. `restart` stops and starts the *existing* container
+> with its baked-in env vars — so the rotated token in `.env` would be
+> ignored. `up -d --force-recreate server` rebuilds the env from the
+> current `.env` and swaps the container in place. `--no-deps` keeps
+> Postgres and the web container untouched.
+
+The new container re-reads `.env` on boot, so the new token is now
 live. Postgres and the web container are not restarted — only the API
 service. Wait for the healthcheck to go green:
 
@@ -122,12 +130,15 @@ You should get back a JSON list of agents (possibly empty), not a 401.
 ### 5. Verify the old token is rejected
 
 ```sh
-curl -fsS -H "Authorization: Bearer $OLD_TOKEN" \
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $OLD_TOKEN" \
   http://localhost:3001/api/agents
 ```
 
-This should return `401 Unauthorized`. If it doesn't, the restart
-didn't pick up the new `.env` — repeat step 3.
+This should print `401`. If it prints `200`, the recreate didn't pick
+up the new `.env` — repeat step 3. (Note: we drop `-f` here on purpose
+— `-f` makes curl exit non-zero on 4xx, which would mask the very
+behavior we're checking for.)
 
 ### 6. Distribute the new token
 
@@ -162,7 +173,7 @@ push), regenerate everything:
 ```sh
 mv .env .env.compromised
 sh bootstrap.sh --force
-docker compose restart server
+docker compose up -d --no-deps --force-recreate server
 ```
 
 `bootstrap.sh --force` regenerates every token, the SSE stream secret,
@@ -185,7 +196,8 @@ for a rotation:**
 cp .env .env.before-rotation
 # ... edit ...
 # if anything is wrong:
-cp .env.before-rotation .env && docker compose restart server
+cp .env.before-rotation .env && \
+  docker compose up -d --no-deps --force-recreate server
 ```
 
 For an emergency `bootstrap.sh --force` run, do the same dance: copy
