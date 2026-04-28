@@ -39,18 +39,45 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.4** (phase 4) — server-side `task.update`, optimistic locking, error envelope, Codex challenge skill, hardened CI
 - **v0.0.5** (phase 5) — Tessera v0.1.0 stabilization, conformance fixtures locked, deprecation policy, semver guarantees
 - **v0.0.6** (phase 6) — buffer + hardening: pagination contract on `events.list` / `tasks.list` / `agents.list`, SSE realtime fallback, nightly `pg_dump` backup sidecar with `docs/RESTORE.md` playbook
+- **v0.0.7** (phase 7) — 30-minute self-host bundle: server + web Dockerfiles, `bootstrap.sh`, `docs/TOKEN-ROTATION.md`, README walkthrough
 - **v0.0.x** — vertical slices, one per phase, through phase 8
 - **v0.1.0** (phase 8) — first public release, self-host walkthrough, Tessera v0.1 milestone
 
-## Self-host (target: phase 8)
+## Self-host (30 minutes, end-to-end)
+
+You need: Docker (with Compose v2), ~2 GB free RAM, ~5 GB free disk.
+That's it. No Postgres install, no Node/Bun, no nginx config.
 
 ```sh
-docker compose up    # not yet available — coming v0.1
+git clone https://github.com/leotorrealba/sprino.git
+cd sprino
+sh bootstrap.sh                       # generates .env with random secrets
+docker compose --profile full up -d   # build + start postgres + server + web + backup sidecar
 ```
 
-Nightly Postgres backups are produced by an opt-in sidecar — see
-[`docs/RESTORE.md`](./docs/RESTORE.md) for the schedule, retention policy,
-and the disaster-recovery playbook.
+When `bootstrap.sh` finishes it prints your admin token. Open
+<http://localhost:3000>, paste the name and token, and create your
+first task. The server is at <http://localhost:3001> if you want to
+poke at the API directly.
+
+To stop everything:
+
+```sh
+docker compose --profile full down       # stop, keep data
+docker compose --profile full down -v    # stop, wipe Postgres volume
+```
+
+### Day-2 docs
+
+- **Backups & disaster recovery:** [`docs/RESTORE.md`](./docs/RESTORE.md)
+  — the `full` profile runs a nightly `pg_dump` sidecar; this is the
+  playbook for restoring from one of those files.
+- **Rotating tokens:** [`docs/TOKEN-ROTATION.md`](./docs/TOKEN-ROTATION.md)
+  — how to replace an actor's bearer token (planned rotation, leak
+  response, or full reset).
+- **Git workflow:** [`docs/git-workflow.md`](./docs/git-workflow.md) —
+  branch protection, conversation-resolution gating, the
+  `enforce_admins` escape hatch.
 
 Until v0.1, this is private active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening this quarter.
 
