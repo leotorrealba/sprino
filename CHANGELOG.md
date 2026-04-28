@@ -6,8 +6,52 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
-### Added
-- `CHANGELOG.md` (this file) and `ANNOUNCEMENT.md` blog draft (Phase 8B).
+## [v0.0.9] — 2026-04-29
+
+### Added (Phase 9 — Actor lifecycle)
+- **Tessera v0.1.2 verbs**: `actor.register`, `actor.list`, `actor.get`,
+  `actor.revoke_token` exposed over both HTTP (`/api/actors*`) and MCP
+  (`/mcp`). Sprino-only `POST /api/actors/:id/rotate_token` for in-app
+  credential rotation.
+- **Members tab** in the web UI: invite humans, rotate/revoke tokens
+  for db-source actors, with a one-time-reveal dialog for new
+  plaintext credentials. Env-source actors render with an "edit .env
+  to rotate" hint and disabled actions.
+- **Two-source actor model**: every actor row carries `source: 'env' |
+  'db'`. Env actors are reconciled into the database on every server
+  boot via `seedFromEnv()` — restoring an env entry restores access
+  even if the database has been tampered with.
+- `docs/TOKEN-RECOVERY.md` — break-glass playbook covering lost-admin,
+  lost-token, and "I want a guaranteed recovery path" scenarios.
+
+### Changed
+- **Single auth path.** Bearer middleware no longer reads
+  `SPRINO_ACTORS_JSON` at request time. All credentials live in
+  `actor_tokens`; env tokens are imported at boot. Eliminates the
+  "two registries can disagree" failure mode of v0.0.7.
+- `actor_tokens` table gained a partial unique index `(actor_id) WHERE
+  revoked_at IS NULL` — Postgres enforces "at most one active token
+  per actor" as a hard invariant. Race-safe rotate snapshots active
+  IDs before the transaction and uses a conditional UPDATE that throws
+  `ConcurrentRotationError` if another caller won the race.
+- `actor.register` responses are **redacted in the idempotency cache**:
+  the persisted `operations.response_body` carries only the actor row
+  and a `_token_redacted: true` flag, never the plaintext. Replays of
+  the same `operation_id` return `{ actor, token: null, replayed: true }`.
+- Last-admin guard: revoking or rotating the only active human admin
+  token returns `409 last_admin_protected` so an operator cannot lock
+  themselves out by accident.
+
+### Fixed
+- `docs/TOKEN-ROTATION.md` updated to describe the v0.0.9 split: db
+  actors rotate via the UI, env actors still rotate via env-edit +
+  restart.
+
+### Known limitations
+- No agent-runtime metadata UI yet (the field is plumbed end-to-end
+  but the Members table doesn't surface it).
+- Audit feed shows actor verbs as raw `actor.register` etc. — no
+  prettier rendering yet.
 
 ## [v0.0.7] — 2026-04-28
 

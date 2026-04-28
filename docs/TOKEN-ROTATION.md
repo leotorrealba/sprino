@@ -1,5 +1,24 @@
 # Rotating Sprino actor tokens
 
+# Rotating Sprino actor tokens
+
+> **v0.0.9 update.** Sprino now distinguishes two kinds of actors:
+>
+> - **`source: 'db'`** — humans/agents registered through the Members UI
+>   or the `actor.register` Tessera verb. Tokens for these actors can be
+>   rotated **without restarting the server**: hit the "rotate" button in
+>   the Members tab, or `POST /api/actors/:id/rotate_token`. The new
+>   plaintext is shown once; the old token stops working immediately.
+> - **`source: 'env'`** — actors declared in `SPRINO_ACTORS_JSON`. These
+>   are still rotated via the env-edit + restart flow described below.
+>   The Members UI shows them with an "edit .env to rotate" hint and
+>   disables the rotate/revoke buttons. This is intentional: env-source
+>   actors are your **break-glass recovery path** if the database is
+>   unreachable or the last db-admin is gone.
+>
+> See `docs/TOKEN-RECOVERY.md` for the recovery playbook (last-admin
+> lockout, lost token, compromised db, etc.).
+
 Sprino actors (humans and agents) authenticate to the API and to MCP with
 opaque bearer tokens. In the v0.x self-hosted setup, tokens live in the
 `SPRINO_ACTORS_JSON` environment variable, loaded from `.env` at server

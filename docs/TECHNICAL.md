@@ -320,6 +320,60 @@ us about a commercial license.
 
 ---
 
+## 10b. Actor lifecycle (v0.0.9)
+
+The v0.0.9 release replaced the in-memory env-only actor registry with
+a single SQL-backed auth path. Three properties are load-bearing:
+
+**Token format.** Plaintext bearer tokens are 24 random bytes,
+base64url-encoded (no padding) when minted in-app. The database stores
+only `sha256(plaintext)` (hex) in `actor_tokens.token_hash`. Plaintext
+appears exactly twice: in the HTTP/MCP response that mints it, and in
+the one-time-reveal dialog in the Members UI.
+
+**Single auth path.** The bearer middleware always queries
+`actor_tokens` joined to `actors`. There is no fallback to the env
+registry at request time. Env actors are imported into the database on
+boot by `seedFromEnv()` (`apps/server/src/db/seed.ts`), which:
+
+1. Inserts any new env actors with `source='env'`.
+2. Upserts each env token with `source='env'`, **un-revoking** it if
+   the row already exists (defends against malicious DB writes).
+3. Never deletes — actors removed from the env stay in the database
+   for audit history but have no active token.
+
+**Race-safe rotate.** `actor_tokens` carries a partial unique index:
+
+```sql
+CREATE UNIQUE INDEX actor_tokens_one_active
+  ON actor_tokens (actor_id) WHERE revoked_at IS NULL;
+```
+
+Postgres enforces "at most one active token per actor" as a hard
+invariant. The `rotateToken` service snapshots the current active
+token IDs *before* opening the transaction, then inside the
+transaction issues `UPDATE ... WHERE id IN (snapshot) AND revoked_at
+IS NULL RETURNING id`. If `rowsAffected !== snapshot.length`, another
+caller won the race and we throw `ConcurrentRotationError`. The
+partial unique index is the backstop if any other code path forgets
+the check.
+
+**Idempotency redaction.** `actor.register` is idempotent on
+`operation_id`, like every other Tessera write verb. To avoid leaking
+plaintext tokens through the idempotency cache, the service writes a
+redacted body to `operations.response_body` (`{ actor, _token_redacted:
+true }`). Replays return `{ actor, token: null, replayed: true }` —
+the caller must have saved the plaintext on the first response.
+
+**Last-admin guard.** `revokeToken` and `rotateToken` both check
+whether the actor is the only active human admin and refuse with
+`409 last_admin_protected`. Env-source actors are also rejected
+(`409 env_actor_immutable`) — operators rotate them by editing
+`.env` and restarting, which is the documented break-glass path
+(`docs/TOKEN-RECOVERY.md`).
+
+---
+
 ## 11. Where to go next
 
 - New to the project? Read [`docs/EXPLAINED.md`](./EXPLAINED.md).
