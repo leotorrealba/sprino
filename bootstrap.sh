@@ -6,8 +6,10 @@
 # nothing ships with the dev defaults committed in .env.example.
 #
 # Requires: openssl (for random secrets and IDs). Python is optional and
-# only used for UUIDv7 if available; otherwise we fall back to a v4-style
-# random ID, which Postgres accepts since the column is just `uuid`.
+# only used for cleaner JSON escaping if available; otherwise we fall back
+# to a pure-shell path. Generated identifiers are UUIDv4-compatible —
+# Postgres accepts any v1-v8 in a `uuid` column and the seed rows don't
+# need the temporal ordering of v7.
 #
 # Usage:
 #   sh bootstrap.sh                    # generate .env if missing
@@ -58,9 +60,11 @@ gen_secret() {
 }
 
 gen_token() {
-    # 24 bytes base64 = 32 url-safe chars. Tokens go in Authorization:
-    # Bearer headers, so we keep them ASCII-safe.
-    openssl rand -base64 24 | tr -d '=+/' | cut -c1-32
+    # 24 random bytes -> exactly 32 base64 chars (no padding because
+    # 192 bits is a multiple of 6). Translate '+/' to base64url's '-_'
+    # so the token stays URL- and Authorization-header-safe without
+    # changing length or biasing the alphabet.
+    openssl rand -base64 24 | tr '+/' '-_' | tr -d '\n'
 }
 
 gen_uuid() {
@@ -97,6 +101,25 @@ ADMIN_NAME=${ADMIN_NAME:-Admin}
 PROJECT_SLUG=${PROJECT_SLUG:-sprino}
 PROJECT_NAME=${PROJECT_NAME:-Sprino}
 
+# Validate that names use only characters that are safe to embed in a
+# single-quoted dotenv value (no apostrophes, no shell metas, no newlines)
+# and in a JSON string without escaping (no double quotes, no backslashes).
+# This sidesteps the entire quoting-edge-case minefield: if your admin
+# really is named O'Connor, edit .env by hand or set ADMIN_NAME after
+# manual escaping.
+SAFE_NAME_RE='^[A-Za-z0-9 ._-]+$'
+for pair in "ADMIN_NAME=$ADMIN_NAME" "PROJECT_NAME=$PROJECT_NAME" "PROJECT_SLUG=$PROJECT_SLUG"; do
+    name=${pair%%=*}
+    val=${pair#*=}
+    if ! printf '%s' "$val" | grep -Eq "$SAFE_NAME_RE"; then
+        echo "bootstrap.sh: $name contains characters that are unsafe to" >&2
+        echo "  embed in .env without complex escaping. Allowed: A-Z a-z 0-9" >&2
+        echo "  space . _ -" >&2
+        echo "  Got: $val" >&2
+        exit 1
+    fi
+done
+
 ADMIN_ACTOR_ID=$(gen_uuid)
 ADMIN_TOKEN=$(gen_token)
 PROJECT_ID=$(gen_uuid)
@@ -104,7 +127,9 @@ STREAM_SECRET=$(gen_secret)
 
 # ---------- write .env ----------
 # Build SPRINO_ACTORS_JSON via python (json escaping is harder than it
-# looks in pure shell when display names can contain spaces or quotes).
+# looks in pure shell when display names can contain spaces). The earlier
+# charset validation guarantees no apostrophes, double quotes, or
+# backslashes here — so both the python and pure-sh paths are safe.
 if command -v python3 >/dev/null 2>&1; then
     ACTORS_JSON=$(ADMIN_ACTOR_ID="$ADMIN_ACTOR_ID" ADMIN_TOKEN="$ADMIN_TOKEN" ADMIN_NAME="$ADMIN_NAME" \
         python3 -c '
@@ -117,14 +142,6 @@ print(json.dumps([{
     "agent_runtime": None,
 }]))')
 else
-    # Minimal manual JSON: ADMIN_NAME is forced to ASCII-safe in the
-    # check below.
-    case "$ADMIN_NAME" in
-        *'"'*|*\\*)
-            echo "bootstrap.sh: ADMIN_NAME contains characters that would" >&2
-            echo "  require JSON escaping; install python3 or use a simpler name." >&2
-            exit 1 ;;
-    esac
     ACTORS_JSON=$(printf '[{"id":"%s","kind":"human","display_name":"%s","token":"%s","agent_runtime":null}]' \
         "$ADMIN_ACTOR_ID" "$ADMIN_NAME" "$ADMIN_TOKEN")
 fi
@@ -139,6 +156,7 @@ cat > "$ENV_FILE" <<EOF
 DATABASE_URL=postgres://sprino:sprino@postgres:5432/sprino_dev
 
 # ---------- Auth ----------
+# Single-quoted so embedded JSON double-quotes survive dotenv parsing.
 SPRINO_ACTORS_JSON='${ACTORS_JSON}'
 
 # ---------- Realtime (SSE) ----------
@@ -146,8 +164,8 @@ SPRINO_STREAM_SECRET=${STREAM_SECRET}
 
 # ---------- Project bootstrap ----------
 SPRINO_DEFAULT_PROJECT_ID=${PROJECT_ID}
-SPRINO_DEFAULT_PROJECT_SLUG=${PROJECT_SLUG}
-SPRINO_DEFAULT_PROJECT_DISPLAY_NAME=${PROJECT_NAME}
+SPRINO_DEFAULT_PROJECT_SLUG='${PROJECT_SLUG}'
+SPRINO_DEFAULT_PROJECT_DISPLAY_NAME='${PROJECT_NAME}'
 
 # ---------- Server ----------
 PORT=3001

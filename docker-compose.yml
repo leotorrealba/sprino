@@ -58,7 +58,7 @@ services:
     ports:
       - "3001:3001"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3001/healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -77,7 +77,7 @@ services:
     ports:
       - "3000:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/web-healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/web-healthz || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 6
