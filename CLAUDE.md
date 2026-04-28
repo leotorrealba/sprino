@@ -16,7 +16,7 @@
 - Realtime: SSE with poll fallback (LISTEN/NOTIFY deferred to v0.2)
 - Deploy: Docker Compose
 
-Pin exact minor versions in week 1's `package.json`.
+Pin exact minor versions in phase 1's `package.json`.
 
 ## Architecture rule (the load-bearing one)
 
@@ -24,7 +24,7 @@ Pin exact minor versions in week 1's `package.json`.
 
 If you find yourself writing business logic in `adapters/` or in a route handler, move it to `service/`. That's the only architectural rule that matters.
 
-## Folder layout (week 1 starting state)
+## Folder layout (phase 1 starting state)
 
 ```
 sprino/
@@ -79,4 +79,4 @@ Rule of thumb: if a second implementer would also need to make the same decision
 
 ## Design doc
 
-Living design doc with full week-by-week plan, architecture rationale, and review history: `~/.gstack/projects/Sprino/leotorrealba-main-design-20260426-234657.md` (maintainer-local, not committed).
+Living design doc with full phase-by-phase plan, architecture rationale, and review history: `~/.gstack/projects/Sprino/leotorrealba-main-design-20260426-234657.md` (maintainer-local, not committed).
