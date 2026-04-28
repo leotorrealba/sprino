@@ -42,9 +42,16 @@ echo "=== Test 2: invalid retention should fail before dumping ==="
 BACKUP_DIR="$TMP_BACKUP_DIR" BACKUP_RETENTION="not-a-number" "$BACKUP_SH" >/dev/null 2>&1 \
   && fail "expected nonzero exit on invalid BACKUP_RETENTION" \
   || pass "invalid retention exits nonzero"
-ls "$TMP_BACKUP_DIR"/*.sql.gz "$TMP_BACKUP_DIR"/*.partial 2>/dev/null \
-  && fail "no files should be written on config error" \
-  || pass "no orphan files written on config error"
+# `compgen -G` (vs `ls "$dir"/*.glob`) is robust against bash's `nullglob`
+# being inherited from the caller's environment via BASHOPTS — without it,
+# an unmatched glob can either fail (nullglob off) or expand to nothing and
+# make `ls` list the CWD (nullglob on), both of which are misleading here.
+if compgen -G "$TMP_BACKUP_DIR/*.sql.gz" >/dev/null \
+  || compgen -G "$TMP_BACKUP_DIR/*.partial" >/dev/null; then
+  fail "no files should be written on config error"
+else
+  pass "no orphan files written on config error"
+fi
 
 echo "=== Test 3: happy path produces a valid gz dump ==="
 BACKUP_DIR="$TMP_BACKUP_DIR" BACKUP_RETENTION=30 "$BACKUP_SH"
@@ -63,7 +70,7 @@ fi
 pass "dump contains expected schema"
 
 echo "=== Test 4: no leftover .partial files ==="
-if ls "$TMP_BACKUP_DIR"/*.partial 2>/dev/null; then
+if compgen -G "$TMP_BACKUP_DIR/*.partial" >/dev/null; then
   fail "found leftover .partial files"
 fi
 pass "no leftover .partial files"

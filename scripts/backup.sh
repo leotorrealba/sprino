@@ -7,14 +7,23 @@
 # backups are kept.
 #
 # Required env:
-#   PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE  — Postgres connection
-#   BACKUP_DIR                                      — destination directory
+#   PGHOST, PGPORT, PGUSER, PGDATABASE  — Postgres connection
+#   BACKUP_DIR                          — destination directory
 #
 # Optional env:
+#   PGPASSWORD        — Postgres password. Optional only if .pgpass / trust /
+#                       peer auth is configured; required otherwise.
 #   BACKUP_RETENTION  — number of backups to keep (default 30)
-#   BACKUP_FILENAME   — override filename; default sprino-YYYYMMDD-HHMMSS.sql.gz
+#   BACKUP_PREFIX     — filename prefix used for both the default filename
+#                       and the retention prune glob (default "sprino-").
+#                       Override this if you run multiple Sprino instances
+#                       writing to the same BACKUP_DIR so each instance
+#                       prunes only its own files.
+#   BACKUP_FILENAME   — override filename; default ${BACKUP_PREFIX}YYYYMMDD-HHMMSS.sql.gz
 #                       (timestamp ensures multiple backups in one day all
-#                       survive, instead of overwriting each other)
+#                       survive, instead of overwriting each other). Note:
+#                       if you use BACKUP_FILENAME, make sure it begins with
+#                       BACKUP_PREFIX so retention pruning still applies.
 #
 # Exit codes:
 #   0  success
@@ -42,24 +51,35 @@ if [ "$RETENTION" -lt 1 ]; then
   exit 1
 fi
 
+PREFIX="${BACKUP_PREFIX:-sprino-}"
+
 mkdir -p "$BACKUP_DIR"
 
 TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)
-DEFAULT_NAME="sprino-${TIMESTAMP}.sql.gz"
+DEFAULT_NAME="${PREFIX}${TIMESTAMP}.sql.gz"
 FILENAME="${BACKUP_FILENAME:-$DEFAULT_NAME}"
 TARGET="$BACKUP_DIR/$FILENAME"
 TMP="$TARGET.partial"
+DUMP_TMP="$TARGET.sql.partial"
 
 echo "[backup] dumping $PGDATABASE@$PGHOST:$PGPORT -> $TARGET"
 
-# Dump to a .partial file first so a half-written file never appears
-# in the retention list (and is never picked up by a parallel restore).
+# Dump to a temporary SQL file first so we can reliably detect pg_dump
+# failures in POSIX /bin/sh (no `pipefail`) before compressing the result.
+# Without this split, a failing pg_dump piped into gzip still produces a
+# valid (but empty/truncated) gzip file and the script would exit 0.
 # `--no-owner --no-privileges` keeps the dump portable across users.
-if ! pg_dump --no-owner --no-privileges "$PGDATABASE" | gzip -9 > "$TMP"; then
-  rm -f "$TMP"
+if ! pg_dump --no-owner --no-privileges "$PGDATABASE" > "$DUMP_TMP"; then
+  rm -f "$DUMP_TMP" "$TMP"
   echo "[backup] pg_dump failed" >&2
   exit 2
 fi
+if ! gzip -9 < "$DUMP_TMP" > "$TMP"; then
+  rm -f "$DUMP_TMP" "$TMP"
+  echo "[backup] gzip failed" >&2
+  exit 2
+fi
+rm -f "$DUMP_TMP"
 
 # Sanity-check: gzip integrity must verify before we accept the dump.
 if ! gzip -t "$TMP" 2>/dev/null; then
@@ -72,12 +92,16 @@ mv "$TMP" "$TARGET"
 SIZE=$(wc -c < "$TARGET" | tr -d ' ')
 echo "[backup] wrote $TARGET ($SIZE bytes)"
 
-# Retention: keep the $RETENTION newest files matching sprino-*.sql.gz,
+# Retention: keep the $RETENTION newest files matching ${PREFIX}*.sql.gz,
 # delete the rest. Using `ls -t` for portability across busybox/coreutils.
+# We avoid `echo "$OLD" | while ...` because in /bin/sh implementations like
+# Alpine ash the while-in-pipe runs in a subshell, so an `exit 3` inside it
+# wouldn't propagate to the parent process and a prune failure would be
+# silently swallowed. A here-doc redirect keeps the loop in the main shell.
 # shellcheck disable=SC2012  # we deliberately need timestamp-sorted listing
-OLD=$(ls -1t "$BACKUP_DIR"/sprino-*.sql.gz 2>/dev/null | tail -n +"$((RETENTION + 1))" || true)
+OLD=$(ls -1t "$BACKUP_DIR"/${PREFIX}*.sql.gz 2>/dev/null | tail -n +"$((RETENTION + 1))" || true)
 if [ -n "$OLD" ]; then
-  echo "$OLD" | while IFS= read -r f; do
+  while IFS= read -r f; do
     [ -z "$f" ] && continue
     if rm -f "$f"; then
       echo "[backup] pruned $f"
@@ -85,7 +109,9 @@ if [ -n "$OLD" ]; then
       echo "[backup] failed to prune $f" >&2
       exit 3
     fi
-  done
+  done <<EOF
+$OLD
+EOF
 fi
 
 echo "[backup] done"
