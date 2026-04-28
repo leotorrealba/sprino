@@ -52,10 +52,17 @@ services:
       NODE_ENV: production
       SPRINO_ACTORS_JSON: ${SPRINO_ACTORS_JSON}
       SPRINO_STREAM_SECRET: ${SPRINO_STREAM_SECRET}
-      SPRINO_DEFAULT_PROJECT_SLUG: sprino
-      SPRINO_DEFAULT_PROJECT_ID: 018c3e7a-0002-7000-8000-000000000001
+      SPRINO_DEFAULT_PROJECT_SLUG: ${SPRINO_DEFAULT_PROJECT_SLUG:-sprino}
+      SPRINO_DEFAULT_PROJECT_ID: ${SPRINO_DEFAULT_PROJECT_ID:-018c3e7a-0002-7000-8000-000000000001}
+      SPRINO_DEFAULT_PROJECT_DISPLAY_NAME: ${SPRINO_DEFAULT_PROJECT_DISPLAY_NAME:-Sprino}
     ports:
       - "3001:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3001/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
 
   web:
     profiles: ["full"]
@@ -65,9 +72,15 @@ services:
     container_name: sprino-web
     restart: unless-stopped
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/web-healthz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
   backup:
     profiles: ["backup", "full"]
