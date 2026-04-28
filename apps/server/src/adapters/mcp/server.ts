@@ -28,6 +28,10 @@ import {
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskUpdateStatusReqSchema,
+  ActorRegisterReqSchema,
+  ActorListReqSchema,
+  ActorGetReqSchema,
+  ActorRevokeTokenReqSchema,
 } from '../../domain/index.ts';
 import {
   ProjectNotFoundError,
@@ -45,6 +49,16 @@ import {
   IdempotencyConflictError,
   OperationExpiredError,
 } from '../../service/idempotency.ts';
+import {
+  ActorNotFoundError,
+  ActorValidationError,
+  EnvActorImmutableError,
+  LastAdminProtectedError,
+  getActor,
+  listActors,
+  registerActor,
+  revokeToken,
+} from '../../service/actors.ts';
 
 type Env = { Variables: { actor: ActorEntry; db: Db } };
 
@@ -130,6 +144,59 @@ const TOOL_DEFINITIONS = [
         task_id: { type: 'string', format: 'uuid' },
         status: { enum: ['todo', 'doing', 'done', 'blocked'] },
         if_match: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
+  {
+    name: 'sprino.actor.register',
+    description:
+      'Register a new human actor (Tessera v0.1.2). Idempotent via operation_id (UUIDv7). Returns {actor, token} on first call; replay returns {actor} only — plaintext token is shown exactly once.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'display_name', 'kind'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        display_name: { type: 'string', minLength: 1, maxLength: 200 },
+        kind: { type: 'string', enum: ['human'] },
+      },
+    },
+  },
+  {
+    name: 'sprino.actor.list',
+    description:
+      'List actors known to Sprino (Tessera v0.1.2). Optional kind filter.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { type: 'string', enum: ['human', 'agent'] },
+      },
+    },
+  },
+  {
+    name: 'sprino.actor.get',
+    description: 'Fetch an actor by actor_id (Tessera v0.1.2).',
+    inputSchema: {
+      type: 'object',
+      required: ['actor_id'],
+      additionalProperties: false,
+      properties: {
+        actor_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.actor.revoke_token',
+    description:
+      'Revoke all active credentials for an actor (Tessera v0.1.2). Idempotent at both the operation_id layer and the domain layer (revoking an actor with no active tokens is a no-op).',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
       },
     },
   },
@@ -224,6 +291,26 @@ async function callTool(
       const res = await updateTaskStatus(db, { req, actorId: actor.id });
       return wrapToolResult(res);
     }
+    case 'sprino.actor.register': {
+      const req = ActorRegisterReqSchema.parse(args);
+      const res = await registerActor(db, { req, callerId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.actor.list': {
+      const req = ActorListReqSchema.parse(args ?? {});
+      const res = await listActors(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.actor.get': {
+      const req = ActorGetReqSchema.parse(args);
+      const res = await getActor(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.actor.revoke_token': {
+      const req = ActorRevokeTokenReqSchema.parse(args);
+      const res = await revokeToken(db, { req, callerId: actor.id });
+      return wrapToolResult(res);
+    }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
   }
@@ -288,6 +375,25 @@ function translateError(
   }
   if (err instanceof OperationExpiredError) {
     return rpcError(id, -32011, 'operation_expired');
+  }
+  if (err instanceof ActorValidationError) {
+    return rpcError(id, -32602, 'validation_error', {
+      field: err.field,
+      reason: err.reason,
+    });
+  }
+  if (err instanceof ActorNotFoundError) {
+    return rpcError(id, -32004, 'not_found', { actor_id: err.actorId });
+  }
+  if (err instanceof LastAdminProtectedError) {
+    return rpcError(id, -32012, 'last_admin_protected', {
+      actor_id: err.actorId,
+    });
+  }
+  if (err instanceof EnvActorImmutableError) {
+    return rpcError(id, -32013, 'operation_unsupported', {
+      actor_id: err.actorId,
+    });
   }
   console.error('Unhandled MCP error:', err);
   return rpcError(id, -32603, 'Internal error');

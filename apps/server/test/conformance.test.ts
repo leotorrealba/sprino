@@ -320,6 +320,10 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       result: { tools: Array<{ name: string }> };
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
+      'sprino.actor.get',
+      'sprino.actor.list',
+      'sprino.actor.register',
+      'sprino.actor.revoke_token',
       'sprino.project.get',
       'sprino.project.list',
       'sprino.task.create',
@@ -661,5 +665,242 @@ describe('Tessera v0.1.1 conformance — new fixtures', () => {
     expect(
       JSON.stringify(body.agent_context).length,
     ).toBeLessThanOrEqual(32 * 1024);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Tessera v0.1.2 — actor lifecycle conformance.
+// ───────────────────────────────────────────────────────────────────────
+
+describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
+  it('runs register-happy → register-replay → revoke-happy → revoke-already-revoked', async () => {
+    const app = buildTestApp();
+
+    // ── register-happy ─────────────────────────────────────────────────
+    const registerReq = readFixture(
+      'actor-register-happy.req.json',
+    ) as Record<string, unknown>;
+    const expectedRegister = readFixture(
+      'actor-register-happy.res.json',
+    ) as Record<string, unknown>;
+
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(registerReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as {
+      actor: Record<string, unknown>;
+      token?: string;
+    };
+    const expActor = expectedRegister.actor as Record<string, unknown>;
+    expect(regJson.actor.kind).toBe(expActor.kind);
+    expect(regJson.actor.display_name).toBe(expActor.display_name);
+    expect(regJson.actor.agent_runtime).toBe(null);
+    expect(regJson.actor.parent_actor_id).toBe(null);
+    // We mint with uuidv7 server-side; fixture uuid won't match exactly.
+    expect(regJson.actor.id).toMatch(UUID_RE);
+    expect(regJson.actor.created_at).toMatch(ISO_DATETIME_RE);
+    expect(typeof regJson.token).toBe('string');
+    expect(regJson.token!.length).toBeGreaterThanOrEqual(32);
+
+    const mintedActorId = regJson.actor.id as string;
+    const mintedToken = regJson.token!;
+
+    // ── register-operation-replay (same op_id, same payload) ──────────
+    const replayReq = readFixture(
+      'actor-register-operation-replay.req.json',
+    ) as Record<string, unknown>;
+    expect(replayReq.operation_id).toBe(registerReq.operation_id);
+
+    const replayResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(replayReq)),
+    );
+    expect(replayResp.status).toBe(201);
+    const replayJson = (await replayResp.json()) as Record<string, unknown>;
+    // Redaction is the load-bearing assertion: no `token` field on replay.
+    expect('token' in replayJson).toBe(false);
+    expect((replayJson.actor as Record<string, unknown>).id).toBe(
+      mintedActorId,
+    );
+
+    // Newly minted credential authenticates.
+    const meResp = await app.fetch(
+      new Request(`http://test/api/actors/${mintedActorId}`, {
+        headers: { authorization: `Bearer ${mintedToken}` },
+      }),
+    );
+    expect(meResp.status).toBe(200);
+
+    // ── revoke-happy ──────────────────────────────────────────────────
+    const revokeReq = {
+      ...(readFixture('actor-revoke-happy.req.json') as Record<string, unknown>),
+      actor_id: mintedActorId,
+    };
+    const revokeResp = await app.fetch(
+      new Request(
+        `http://test/api/actors/${mintedActorId}/revoke_token`,
+        bearer(revokeReq),
+      ),
+    );
+    expect(revokeResp.status).toBe(200);
+    const revokeJson = (await revokeResp.json()) as {
+      actor: Record<string, unknown>;
+    };
+    expect('token' in revokeJson).toBe(false);
+    expect(revokeJson.actor.id).toBe(mintedActorId);
+
+    // The previously-minted credential now fails auth.
+    const denied = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: { authorization: `Bearer ${mintedToken}` },
+      }),
+    );
+    expect(denied.status).toBe(403);
+
+    // ── revoke-already-revoked (different op_id, same actor) ──────────
+    const replayRevokeReq: Record<string, unknown> = {
+      ...(readFixture(
+        'actor-revoke-already-revoked.req.json',
+      ) as Record<string, unknown>),
+      actor_id: mintedActorId,
+    };
+    expect(replayRevokeReq.operation_id).not.toBe(
+      (revokeReq as Record<string, unknown>).operation_id,
+    );
+
+    const replayRevokeResp = await app.fetch(
+      new Request(
+        `http://test/api/actors/${mintedActorId}/revoke_token`,
+        bearer(replayRevokeReq),
+      ),
+    );
+    expect(replayRevokeResp.status).toBe(200);
+    const replayRevokeJson = (await replayRevokeResp.json()) as {
+      actor: Record<string, unknown>;
+    };
+    expect(replayRevokeJson.actor.id).toBe(mintedActorId);
+  });
+
+  it('rejects register with kind=agent (v0.1.2 humans-only)', async () => {
+    const app = buildTestApp();
+    const req = readFixture(
+      'actor-register-invalid-kind.req.json',
+    ) as Record<string, unknown>;
+    const r = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as {
+      _error: { status: number; code: string; details: { field: string; reason: string } };
+    };
+    expect(body._error.status).toBe(400);
+    expect(body._error.code).toBe('validation_error');
+    expect(body._error.details.field).toBe('kind');
+    expect(body._error.details.reason).toBe(
+      'Only `human` is accepted in v0.1.2.',
+    );
+  });
+
+  it('rejects register with missing display_name', async () => {
+    const app = buildTestApp();
+    const req = readFixture(
+      'actor-register-validation-error.req.json',
+    ) as Record<string, unknown>;
+    const r = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as {
+      _error: { details: { field: string; reason: string } };
+    };
+    expect(body._error.details.field).toBe('display_name');
+    expect(body._error.details.reason).toBe('Required field is missing.');
+  });
+
+  it('returns 404 _error envelope for actor.get on unknown id', async () => {
+    const app = buildTestApp();
+    const req = readFixture(
+      'actor-get-not-found.req.json',
+    ) as Record<string, unknown>;
+    const r = await app.fetch(
+      new Request(`http://test/api/actors/${req.actor_id}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(404);
+    const body = (await r.json()) as {
+      _error: { code: string; details: { field: string; reason: string } };
+    };
+    expect(body._error.code).toBe('not_found');
+    expect(body._error.details.field).toBe('actor_id');
+  });
+
+  it('returns 404 _error envelope (and no operation row cached) for revoke on unknown id', async () => {
+    const app = buildTestApp();
+    const req = readFixture(
+      'actor-revoke-not-found.req.json',
+    ) as Record<string, unknown>;
+    const unknownId = req.actor_id as string;
+    const r = await app.fetch(
+      new Request(
+        `http://test/api/actors/${unknownId}/revoke_token`,
+        bearer(req),
+      ),
+    );
+    expect(r.status).toBe(404);
+
+    // Same operation_id with a valid actor_id must NOT replay the cached
+    // 404 — failed-precondition operations are not cached, per the
+    // fixture's _meta.expected_behavior. We retry by posting against the
+    // FIXTURE_ACTOR_ID with the same op_id; it should succeed (200).
+    // (Last-admin guard would fire, but our test agent token still
+    // satisfies the human-credential count if we revoke FIXTURE_ACTOR.
+    // Instead, register a fresh human and revoke that one.)
+    const newReg = await app.fetch(
+      new Request(
+        'http://test/api/actors',
+        bearer({
+          operation_id: '018c3e7a-9999-7000-8000-000000000001',
+          display_name: 'Retryable',
+          kind: 'human',
+        }),
+      ),
+    );
+    const newRegJson = (await newReg.json()) as { actor: { id: string } };
+    const retried = await app.fetch(
+      new Request(
+        `http://test/api/actors/${newRegJson.actor.id}/revoke_token`,
+        bearer({
+          operation_id: req.operation_id,
+          actor_id: newRegJson.actor.id,
+        }),
+      ),
+    );
+    expect(retried.status).toBe(200);
+  });
+
+  it('list-happy returns the {actors: [...]} envelope', async () => {
+    const app = buildTestApp();
+    const r = await app.fetch(
+      new Request('http://test/api/actors', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { actors: Array<Record<string, unknown>> };
+    expect(Array.isArray(body.actors)).toBe(true);
+    expect(body.actors.length).toBeGreaterThan(0);
+  });
+
+  it('list-filtered-by-kind returns only humans', async () => {
+    const app = buildTestApp();
+    const r = await app.fetch(
+      new Request('http://test/api/actors?kind=human', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { actors: Array<{ kind: string }> };
+    expect(body.actors.every((a) => a.kind === 'human')).toBe(true);
   });
 });
