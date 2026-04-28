@@ -10,10 +10,15 @@ in the database is gone.
 Every actor has a `source`: `env` or `db`.
 
 - **`env`** actors come from `SPRINO_ACTORS_JSON`. On every server boot,
-  Sprino reconciles that env into the database: it inserts any new env
-  actors and **un-revokes any of their tokens that were revoked**, so an
-  attacker with database access cannot lock you out by flipping bits.
-  The reconciler is `seedFromEnv()` in `apps/server/src/db/seed.ts`.
+  Sprino reconciles that env into the database: it upserts any new env
+  actors and imports their tokens into `actor_tokens` (hashed, with
+  `source='env'`). If an env entry is removed, its tokens are revoked.
+  Re-adding a previously-revoked env token is **rejected** with a hard
+  error — that path is treated as a security smell (see
+  `apps/server/src/db/seed.ts`). To recover from an attacker flipping
+  `revoked_at` on an env token, generate a fresh token, update
+  `SPRINO_ACTORS_JSON`, and restart — `seedFromEnv()` will treat it as
+  a new credential.
 - **`db`** actors are everything created at runtime through the Members
   UI or `actor.register`. Their tokens are rotated/revoked through the
   app — restarts do not affect them.
