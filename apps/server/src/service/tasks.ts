@@ -34,6 +34,7 @@ import type { Db } from '../db/client.ts';
 import { events, tasks } from '../db/schema.ts';
 import type { TaskRow, EventRow } from '../db/schema.ts';
 import {
+  DEFAULT_LIMIT,
   type AgentContext,
   type Event,
   type Task,
@@ -41,6 +42,8 @@ import {
   type TaskCreateRes,
   type TaskGetReq,
   type TaskGetRes,
+  type TaskListReq,
+  type TaskListRes,
   type TaskStatus,
   type TaskUpdateStatusReq,
   type TaskUpdateStatusRes,
@@ -339,15 +342,19 @@ export async function createTask(
  */
 export async function listTasks(
   db: Db,
-  args: { projectId: string; limit?: number },
-): Promise<{ tasks: Task[] }> {
-  const limit = Math.max(1, Math.min(args.limit ?? 200, 1000));
+  args: { req: TaskListReq },
+): Promise<TaskListRes> {
+  // Bounds (limit ≤ 500, offset ≥ 0) are enforced by TaskListReqSchema.
+  // We only apply a default here when the caller didn't supply one.
+  const limit = args.req.limit ?? DEFAULT_LIMIT;
+  const offset = args.req.offset ?? 0;
   const rows = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.projectId, args.projectId))
-    .orderBy(asc(tasks.createdAt))
-    .limit(limit);
+    .where(eq(tasks.projectId, args.req.project_id))
+    .orderBy(asc(tasks.createdAt), asc(tasks.id))
+    .limit(limit)
+    .offset(offset);
   return { tasks: rows.map(rowToTask) };
 }
 

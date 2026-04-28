@@ -11,6 +11,13 @@
  */
 
 import { z } from 'zod';
+import { MAX_LIMITS, paginationSchema } from './pagination.ts';
+
+export {
+  DEFAULT_LIMIT,
+  MAX_LIMITS,
+  paginationSchema,
+} from './pagination.ts';
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
@@ -163,16 +170,23 @@ export const TaskUpdateStatusReqSchema = z.object({
 });
 export type TaskUpdateStatusReq = z.infer<typeof TaskUpdateStatusReqSchema>;
 
-export const EventListReqSchema = z.object({
-  project_id: uuid,
-  task_id: uuid.optional(),
-  // `z.coerce.number()` accepts strings from the HTTP query layer and
-  // rejects malformed values (`abc`, empty, etc.) with a validation error
-  // rather than silently dropping them.
-  limit: z.coerce.number().int().min(1).max(200).optional(),
-  offset: z.coerce.number().int().min(0).optional(),
-});
+export const EventListReqSchema = z
+  .object({
+    project_id: uuid,
+    task_id: uuid.optional(),
+  })
+  .merge(paginationSchema(MAX_LIMITS.events));
 export type EventListReq = z.infer<typeof EventListReqSchema>;
+
+export const TaskListReqSchema = z
+  .object({
+    project_id: uuid,
+  })
+  .merge(paginationSchema(MAX_LIMITS.tasks));
+export type TaskListReq = z.infer<typeof TaskListReqSchema>;
+
+export const AgentListReqSchema = paginationSchema(MAX_LIMITS.agents);
+export type AgentListReq = z.infer<typeof AgentListReqSchema>;
 
 // ────────────────────────────────────────────────────────────────────────
 // Verbs — response shapes
@@ -211,3 +225,25 @@ export const EventListResSchema = z.object({
   events: z.array(EventWithActorSchema),
 });
 export type EventListRes = z.infer<typeof EventListResSchema>;
+
+export const TaskListResSchema = z.object({
+  tasks: z.array(TaskSchema),
+});
+export type TaskListRes = z.infer<typeof TaskListResSchema>;
+
+// agents.list exposes the registry view of an actor — id, kind, display_name,
+// and optional agent_runtime / parent_actor_id. The auth token is NEVER
+// included in responses.
+export const AgentSchema = z.object({
+  id: uuid,
+  kind: z.literal('agent'),
+  display_name: z.string().min(1).max(200),
+  agent_runtime: z.string().nullable(),
+  parent_actor_id: uuid.nullable(),
+});
+export type Agent = z.infer<typeof AgentSchema>;
+
+export const AgentListResSchema = z.object({
+  agents: z.array(AgentSchema),
+});
+export type AgentListRes = z.infer<typeof AgentListResSchema>;

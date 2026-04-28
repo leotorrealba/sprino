@@ -18,20 +18,19 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { actors, events, tasks } from '../db/schema.ts';
-import type {
-  EventWithActor,
-  EventListReq,
-  EventListRes,
+import {
+  DEFAULT_LIMIT,
+  type EventWithActor,
+  type EventListReq,
+  type EventListRes,
 } from '../domain/index.ts';
-
-const DEFAULT_LIMIT = 50;
 
 export async function listEvents(
   db: Db,
   args: { req: EventListReq },
 ): Promise<EventListRes> {
-  // The upper bound (200) is enforced by EventListReqSchema. We only apply
-  // a default here when the caller didn't supply one.
+  // Bounds (limit ≤ 1000, offset ≥ 0) are enforced by EventListReqSchema.
+  // We only apply a default here when the caller didn't supply one.
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
 
