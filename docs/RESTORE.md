@@ -1,9 +1,14 @@
 # Restoring Sprino from a backup
 
-Sprino's backup sidecar (`scripts/backup.sh`, scheduled by Docker Compose)
-writes a gzipped `pg_dump` of the application database to `./backups/` on
-the host every night. This document is the playbook for using one of those
-files to recover the database.
+When Sprino's backup sidecar (`scripts/backup.sh`, scheduled by Docker
+Compose) is enabled — via either the `backup` or `full` profile (see
+`docker-compose.yml`) — it writes a gzipped `pg_dump` of the application
+database to `./backups/` on the host every night. This document is the
+playbook for using one of those files to recover the database.
+
+If you've been running plain `docker compose up -d` (no profile), the
+sidecar has not been running and there are no backups to restore from —
+that's by design for local dev, not a bug.
 
 > **Audience.** A non-technical operator who can run shell commands in the
 > Sprino directory. If you can `cd` and `docker compose up`, you can do this.

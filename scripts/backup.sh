@@ -53,6 +53,18 @@ fi
 
 PREFIX="${BACKUP_PREFIX:-sprino-}"
 
+# BACKUP_PREFIX is interpolated into a glob in the retention prune step.
+# Restrict it to a safe charset (alnum + dash + underscore + dot) so a
+# whitespace or glob metacharacter can't cause word-splitting or match
+# unintended files. Also forbid path separators — the prefix is a filename
+# component, not a path.
+case "$PREFIX" in
+  *[!A-Za-z0-9_.-]*|"")
+    echo "BACKUP_PREFIX may only contain alphanumerics, '-', '_', '.' (got: '$PREFIX')" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$BACKUP_DIR"
 
 TIMESTAMP=$(date -u +%Y%m%d-%H%M%S)

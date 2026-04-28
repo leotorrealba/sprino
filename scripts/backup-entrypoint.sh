@@ -19,11 +19,14 @@ CRON_FILE="/var/spool/cron/crontabs/root"
 # return in a passed-through env var would break out of its line and could
 # inject extra crontab entries. Reject such values up front rather than
 # silently producing a malformed (or hostile) crontab.
+NL='
+'
+CR=$(printf '\r')
 require_single_line() {
   var_name=$1
   var_value=$2
   case $var_value in
-    *"$(printf '\n')"*|*"$(printf '\r')"*)
+    *"$NL"*|*"$CR"*)
       echo "[backup-sidecar] invalid $var_name: must not contain newlines or carriage returns" >&2
       exit 1
       ;;
@@ -48,6 +51,24 @@ require_single_line "BACKUP_DIR" "$backup_dir"
 require_single_line "BACKUP_RETENTION" "$backup_retention"
 require_single_line "BACKUP_PREFIX" "$backup_prefix"
 require_single_line "BACKUP_CRON" "$CRON_EXPR"
+
+# Fail fast on missing connection settings. Without this, crond would still
+# start happily and every nightly run would silently fail — operators
+# wouldn't notice until they needed a backup that doesn't exist.
+require_non_empty() {
+  var_name=$1
+  var_value=$2
+  if [ -z "$var_value" ]; then
+    echo "[backup-sidecar] $var_name is required but empty — refusing to start" >&2
+    exit 1
+  fi
+}
+require_non_empty "PGHOST"     "$pg_host"
+require_non_empty "PGUSER"     "$pg_user"
+require_non_empty "PGDATABASE" "$pg_database"
+# PGPORT defaults to 5432 in pg_dump itself; PGPASSWORD is optional with
+# .pgpass / trust auth (see backup.sh header). We deliberately don't
+# require_non_empty either of those here.
 
 mkdir -p "$(dirname "$CRON_FILE")"
 

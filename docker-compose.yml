@@ -1,14 +1,17 @@
 # Sprino — Docker Compose
 #
-# Two profiles:
+# Profiles:
 #   - default (no profile): Postgres only, for local dev. Run alongside
 #     `bun --filter '@sprino/server' dev` on the host.
-#   - "full": Postgres + server + web. For week 7 self-host validation.
+#   - "full": Postgres + server + web + backup sidecar. For phase 7
+#     self-host validation. The backup sidecar is intentionally bundled
+#     into `full` so a self-hosted deploy gets nightly backups by default
+#     — operators who want to opt out can pass `--scale backup=0`.
+#   - "backup": just the backup sidecar (combine with default to attach
+#     it to a Postgres-only stack: `docker compose --profile backup up -d`).
 #
-# Optional sidecar:
-#   - "backup" profile: enable nightly pg_dump cron. Off by default in dev
-#     to keep `docker compose up -d` lightweight; turn on with
-#     `docker compose --profile backup up -d` (or combine with `full`).
+# Backups are off by default in plain `docker compose up -d` to keep dev
+# lightweight; they only run when one of the two profiles above is active.
 #
 # Quick start (dev):    docker compose up -d
 # Self-host (week 7):   docker compose --profile full up -d
