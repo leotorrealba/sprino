@@ -52,6 +52,8 @@ import {
 } from './idempotency.ts';
 import { resolveProject } from './projects.ts';
 
+type SelectClient = Pick<Db, 'select'>;
+
 export class TaskNotFoundError extends Error {
   constructor(public readonly taskId: string) {
     super(`task ${taskId} not found`);
@@ -100,7 +102,7 @@ function rowToEvent(r: EventRow): Event {
 }
 
 async function buildAgentContext(
-  db: Db,
+  db: SelectClient,
   taskId: string,
 ): Promise<AgentContext> {
   const recentRows = await db
@@ -145,55 +147,58 @@ export async function createTask(
   // FK on tasks.id. The "events are authoritative" invariant is a *replay*
   // property — given the events table you can rebuild every task — not a
   // byte-order property. Atomicity is guaranteed by the single transaction.
-  const result = await db.transaction(async (tx) => {
-    const [taskRow] = await tx
-      .insert(tasks)
-      .values({
-        id: taskId,
-        projectId: project.id,
-        title: args.req.title,
-        description: args.req.description ?? '',
-        status: 'todo',
-        assigneeId: args.req.assignee_id ?? null,
-        createdBy: args.actorId,
-        version: 1,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
+  try {
+    return await db.transaction(async (tx) => {
+      const [taskRow] = await tx
+        .insert(tasks)
+        .values({
+          id: taskId,
+          projectId: project.id,
+          title: args.req.title,
+          description: args.req.description ?? '',
+          status: 'todo',
+          assigneeId: args.req.assignee_id ?? null,
+          createdBy: args.actorId,
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
 
-    const [eventRow] = await tx
-      .insert(events)
-      .values({
-        id: eventId,
-        taskId,
-        actorId: args.actorId,
-        kind: 'created',
-        payload: { title: args.req.title, status: 'todo' },
+      const [eventRow] = await tx
+        .insert(events)
+        .values({
+          id: eventId,
+          taskId,
+          actorId: args.actorId,
+          kind: 'created',
+          payload: { title: args.req.title, status: 'todo' },
+          operationId: args.req.operation_id,
+          createdAt: now,
+        })
+        .returning();
+
+      const agentContext = await buildAgentContext(tx, taskId);
+      const response: TaskCreateRes = {
+        task: rowToTask(taskRow!),
+        agent_context: agentContext,
+        event: rowToEvent(eventRow!),
+      };
+
+      await recordOperation(tx, {
         operationId: args.req.operation_id,
-        createdAt: now,
-      })
-      .returning();
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
 
-    return { event: eventRow!, task: taskRow! };
-  });
-
-  const agentContext = await buildAgentContext(db, taskId);
-
-  const response: TaskCreateRes = {
-    task: rowToTask(result.task),
-    agent_context: agentContext,
-    event: rowToEvent(result.event),
-  };
-
-  await recordOperation(db, {
-    operationId: args.req.operation_id,
-    actorId: args.actorId,
-    requestHash,
-    responseBody: response,
-  });
-
-  return response;
+      return response;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as TaskCreateRes;
+    throw err;
+  }
 }
 
 /**
@@ -244,70 +249,74 @@ export async function updateTaskStatus(
   const eventId = uuidv7();
   const now = new Date();
 
-  const result = await db.transaction(async (tx) => {
-    // Lock the row: SELECT FOR UPDATE prevents two concurrent updates from
-    // both reading version=N and both incrementing to N+1.
-    const rows = await tx
-      .select()
-      .from(tasks)
-      .where(eq(tasks.id, args.req.task_id))
-      .for('update');
-    const current = rows[0];
+  try {
+    return await db.transaction(async (tx) => {
+      // Lock the row: SELECT FOR UPDATE prevents two concurrent updates from
+      // both reading version=N and both incrementing to N+1.
+      const rows = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, args.req.task_id))
+        .for('update');
+      const current = rows[0];
 
-    if (!current) throw new TaskNotFoundError(args.req.task_id);
-    if (current.version !== args.req.if_match) {
-      throw new VersionMismatchError(rowToTask(current));
-    }
+      if (!current) throw new TaskNotFoundError(args.req.task_id);
+      if (current.version !== args.req.if_match) {
+        throw new VersionMismatchError(rowToTask(current));
+      }
 
-    const previousStatus: TaskStatus = current.status;
+      const previousStatus: TaskStatus = current.status;
 
-    const [eventRow] = await tx
-      .insert(events)
-      .values({
-        id: eventId,
-        taskId: args.req.task_id,
-        actorId: args.actorId,
-        kind: 'status_changed',
-        payload: { from: previousStatus, to: args.req.status },
+      const [eventRow] = await tx
+        .insert(events)
+        .values({
+          id: eventId,
+          taskId: args.req.task_id,
+          actorId: args.actorId,
+          kind: 'status_changed',
+          payload: { from: previousStatus, to: args.req.status },
+          operationId: args.req.operation_id,
+          createdAt: now,
+        })
+        .returning();
+
+      const [updatedRow] = await tx
+        .update(tasks)
+        .set({
+          status: args.req.status,
+          version: current.version + 1,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(tasks.id, args.req.task_id),
+            eq(tasks.version, args.req.if_match),
+          ),
+        )
+        .returning();
+
+      if (!updatedRow) {
+        // Should be unreachable given we held the lock, but defensive.
+        throw new VersionMismatchError(rowToTask(current));
+      }
+
+      const response: TaskUpdateStatusRes = {
+        task: rowToTask(updatedRow),
+        event: rowToEvent(eventRow!),
+      };
+
+      await recordOperation(tx, {
         operationId: args.req.operation_id,
-        createdAt: now,
-      })
-      .returning();
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
 
-    const [updatedRow] = await tx
-      .update(tasks)
-      .set({
-        status: args.req.status,
-        version: current.version + 1,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(tasks.id, args.req.task_id),
-          eq(tasks.version, args.req.if_match),
-        ),
-      )
-      .returning();
-
-    if (!updatedRow) {
-      // Should be unreachable given we held the lock, but defensive.
-      throw new VersionMismatchError(rowToTask(current));
-    }
-
-    return { event: eventRow!, task: updatedRow };
-  });
-
-  const response: TaskUpdateStatusRes = {
-    task: rowToTask(result.task),
-    event: rowToEvent(result.event),
-  };
-
-  await recordOperation(db, {
-    operationId: args.req.operation_id,
-    actorId: args.actorId,
-    requestHash,
-    responseBody: response,
-  });
-
-  return response;
+      return response;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as TaskUpdateStatusRes;
+    throw err;
+  }
 }

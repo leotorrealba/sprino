@@ -15,6 +15,8 @@ import { createHash } from 'node:crypto';
 import type { Db } from '../db/client.ts';
 import { operations } from '../db/schema.ts';
 
+type OperationWriter = Pick<Db, 'insert'>;
+
 export const OPERATION_TTL_DAYS = 30;
 
 export class IdempotencyConflictError extends Error {
@@ -76,10 +78,11 @@ export async function checkIdempotency(
 
 /**
  * Persist the (operation_id, request_hash, response_body) tuple.
- * Caller is inside the same transaction as the actual mutation.
+ * This writes through the provided database client. Callers that need
+ * atomicity with another mutation must pass that mutation's transaction client.
  */
 export async function recordOperation(
-  db: Db,
+  db: OperationWriter,
   args: {
     operationId: string;
     actorId: string;

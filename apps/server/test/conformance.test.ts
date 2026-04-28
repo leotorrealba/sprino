@@ -200,6 +200,40 @@ describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
     expect(getJson.agent_context.recent_events).toHaveLength(1);
   });
 
+  it('concurrent task.create retries return one cached mutation', async () => {
+    const app = buildTestApp();
+    const req = readFixture('task-create-happy.req.json');
+
+    const [first, second] = await Promise.all([
+      app.fetch(new Request('http://test/api/tasks', bearer(req))),
+      app.fetch(new Request('http://test/api/tasks', bearer(req))),
+    ]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+
+    const firstJson = (await first.json()) as {
+      task: { id: string };
+      event: { id: string };
+    };
+    const secondJson = (await second.json()) as {
+      task: { id: string };
+      event: { id: string };
+    };
+
+    expect(secondJson.task.id).toBe(firstJson.task.id);
+    expect(secondJson.event.id).toBe(firstJson.event.id);
+
+    const getResp = await app.fetch(
+      new Request(`http://test/api/tasks/${firstJson.task.id}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    const getJson = (await getResp.json()) as {
+      agent_context: { recent_events: unknown[] };
+    };
+    expect(getJson.agent_context.recent_events).toHaveLength(1);
+  });
+
   it('reused operation_id with a different payload returns 409 with cached body', async () => {
     const app = buildTestApp();
     const req = readFixture('task-create-happy.req.json') as Record<
@@ -356,6 +390,26 @@ describe('Tessera v0.0.2 project scoping', () => {
         display_name: 'Tessera',
       }),
     );
+  });
+
+  it('GET /api/tasks ignores malformed limit query values', async () => {
+    const app = buildTestApp();
+    const createReq = readFixture('task-create-happy.req.json');
+
+    await app.fetch(new Request('http://test/api/tasks', bearer(createReq)));
+
+    const resp = await app.fetch(
+      new Request(
+        `http://test/api/tasks?project_id=${FIXTURE_PROJECT_ID}&limit=foo`,
+        {
+          headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+        },
+      ),
+    );
+
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { tasks: unknown[] };
+    expect(body.tasks).toHaveLength(1);
   });
 
   it('MCP task.create resolves project from repo_path when project_id is omitted', async () => {

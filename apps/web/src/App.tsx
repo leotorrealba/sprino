@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
 
 type LoadState = 'idle' | 'loading' | 'error';
@@ -31,19 +31,17 @@ function uuidv7(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function getToken(): string {
-  const token =
-    localStorage.getItem('sprino_token') ?? prompt('Sprino bearer token') ?? '';
-  if (token) localStorage.setItem('sprino_token', token);
-
-  return token;
-}
+const TOKEN_STORAGE_KEY = 'sprino_token';
+const PROJECT_STORAGE_KEY = 'sprino_project_id';
 
 export function App() {
-  const token = useMemo(getToken, []);
+  const [token, setToken] = useState(
+    () => localStorage.getItem(TOKEN_STORAGE_KEY) ?? '',
+  );
+  const [tokenDraft, setTokenDraft] = useState(token);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState(
-    () => localStorage.getItem('sprino_project_id') ?? '',
+    () => localStorage.getItem(PROJECT_STORAGE_KEY) ?? '',
   );
   const [tasks, setTasks] = useState<Task[]>([]);
   const [load, setLoad] = useState<LoadState>('idle');
@@ -66,6 +64,11 @@ export function App() {
   );
 
   const refreshProjects = useCallback(async () => {
+    if (!token) {
+      setProjects([]);
+      return;
+    }
+
     setError(null);
     try {
       const r = await fetchAuth('/api/projects');
@@ -74,19 +77,20 @@ export function App() {
       setProjects(j.projects);
 
       setSelectedProjectId((current) => {
-        const saved = current || localStorage.getItem('sprino_project_id') || '';
+        const saved =
+          current || localStorage.getItem(PROJECT_STORAGE_KEY) || '';
         if (saved && j.projects.some((p) => p.id === saved)) return saved;
         const first = j.projects[0]?.id ?? '';
-        if (first) localStorage.setItem('sprino_project_id', first);
+        if (first) localStorage.setItem(PROJECT_STORAGE_KEY, first);
         return first;
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [fetchAuth]);
+  }, [fetchAuth, token]);
 
   const refresh = useCallback(async () => {
-    if (!selectedProjectId) {
+    if (!token || !selectedProjectId) {
       setTasks([]);
       return;
     }
@@ -105,7 +109,7 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       setLoad('error');
     }
-  }, [selectedProjectId, fetchAuth]);
+  }, [selectedProjectId, fetchAuth, token]);
 
   useEffect(() => {
     void refreshProjects();
@@ -144,6 +148,14 @@ export function App() {
     }
   };
 
+  const connect = (e: React.FormEvent) => {
+    e.preventDefault();
+    const nextToken = tokenDraft.trim();
+    if (!nextToken) return;
+    localStorage.setItem(TOKEN_STORAGE_KEY, nextToken);
+    setToken(nextToken);
+  };
+
   const changeStatus = async (task: Task, status: TaskStatus) => {
     if (task.status === status) return;
     try {
@@ -165,6 +177,41 @@ export function App() {
     }
   };
 
+  if (!token) {
+    return (
+      <div className="min-h-screen text-slate-800">
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto max-w-4xl px-6 py-4">
+            <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
+            <p className="text-xs text-slate-500">
+              Tessera v0.0.2 reference impl
+            </p>
+          </div>
+        </header>
+        <main className="mx-auto max-w-4xl px-6 py-8">
+          <form
+            onSubmit={connect}
+            className="flex max-w-md gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+          >
+            <input
+              value={tokenDraft}
+              onChange={(e) => setTokenDraft(e.target.value)}
+              placeholder="Bearer token"
+              className="min-w-0 flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!tokenDraft.trim()}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+            >
+              connect
+            </button>
+          </form>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen text-slate-800">
       <header className="border-b border-slate-200 bg-white">
@@ -181,7 +228,7 @@ export function App() {
               onChange={(e) => {
                 const id = e.target.value;
                 setSelectedProjectId(id);
-                localStorage.setItem('sprino_project_id', id);
+                localStorage.setItem(PROJECT_STORAGE_KEY, id);
               }}
               className="h-9 min-w-40 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
             >
@@ -197,9 +244,13 @@ export function App() {
             </select>
             <button
               onClick={() => {
-                localStorage.removeItem('sprino_token');
-                localStorage.removeItem('sprino_project_id');
-                window.location.reload();
+                localStorage.removeItem(TOKEN_STORAGE_KEY);
+                localStorage.removeItem(PROJECT_STORAGE_KEY);
+                setToken('');
+                setTokenDraft('');
+                setSelectedProjectId('');
+                setProjects([]);
+                setTasks([]);
               }}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
             >

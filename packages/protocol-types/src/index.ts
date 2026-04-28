@@ -1,10 +1,10 @@
 /**
  * @sprino/protocol-types — shared wire types for Tessera v0.0.2.
  *
- * This package is the single source of truth for the runtime-validated
- * wire shape used by both `apps/server` and `apps/web`. It mirrors the
- * canonical JSON Schemas in `tessera/schemas/` but is implemented in Zod
- * for ergonomics inside the TypeScript monorepo.
+ * This package is the shared TypeScript/Zod mirror of the canonical JSON
+ * Schemas in `tessera/schemas/`. The web app imports these types directly;
+ * the server keeps its own adapter-boundary validators until schema
+ * generation/checking is wired in.
  *
  * Cross-checking note (deferred to v0.0.2): a CI test will verify that
  * `z.toJSONSchema()` output of these schemas matches the JSON Schemas
@@ -20,7 +20,7 @@ const projectSlug = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/);
+  .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/);
 
 // ────────────────────────────────────────────────────────────────────────
 // Resources

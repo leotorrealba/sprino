@@ -97,7 +97,16 @@ export function buildHttpRoutes(): Hono<Env> {
         );
       }
       const limitRaw = c.req.query('limit');
-      const limit = limitRaw ? Number(limitRaw) : undefined;
+      const parsedLimit =
+        limitRaw !== undefined && /^-?\d+$/.test(limitRaw)
+          ? Number(limitRaw)
+          : undefined;
+      const limit =
+        parsedLimit !== undefined &&
+        Number.isFinite(parsedLimit) &&
+        Number.isInteger(parsedLimit)
+          ? parsedLimit
+          : undefined;
       const res = await listTasks(c.get('db'), { projectId, limit });
       return c.json(res, 200);
     } catch (err) {
