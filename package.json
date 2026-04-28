@@ -13,6 +13,7 @@
     "dev": "bun --filter '@sprino/server' dev",
     "build": "bun run --filter '*' build",
     "test": "bun --filter '@sprino/server' test",
+    "test:backup": "bash scripts/backup.test.sh",
     "db:migrate": "bun --filter '@sprino/server' db:migrate",
     "db:reset": "bun --filter '@sprino/server' db:reset",
     "typecheck": "bun --filter '*' typecheck"

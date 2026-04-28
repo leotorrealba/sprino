@@ -44,6 +44,10 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 docker compose up    # not yet available — coming v0.1
 ```
 
+Nightly Postgres backups are produced by an opt-in sidecar — see
+[`docs/RESTORE.md`](./docs/RESTORE.md) for the schedule, retention policy,
+and the disaster-recovery playbook.
+
 Until v0.1, this is private active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening this quarter.
 
 ## License

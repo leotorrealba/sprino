@@ -5,8 +5,14 @@
 #     `bun --filter '@sprino/server' dev` on the host.
 #   - "full": Postgres + server + web. For week 7 self-host validation.
 #
+# Optional sidecar:
+#   - "backup" profile: enable nightly pg_dump cron. Off by default in dev
+#     to keep `docker compose up -d` lightweight; turn on with
+#     `docker compose --profile backup up -d` (or combine with `full`).
+#
 # Quick start (dev):    docker compose up -d
 # Self-host (week 7):   docker compose --profile full up -d
+# With backups:         docker compose --profile full --profile backup up -d
 
 services:
   postgres:
@@ -59,6 +65,30 @@ services:
       - server
     ports:
       - "3000:3000"
+
+  backup:
+    profiles: ["backup", "full"]
+    image: postgres:16-alpine
+    container_name: sprino-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: sprino
+      PGPASSWORD: sprino
+      PGDATABASE: sprino_dev
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-30}
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-0}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./scripts/backup-entrypoint.sh:/usr/local/bin/backup-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-entrypoint.sh"]
 
 volumes:
   sprino-postgres-data:
