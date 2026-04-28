@@ -70,6 +70,42 @@ export class VersionMismatchError extends Error {
 
 const RECENT_EVENTS_LIMIT = 20;
 
+// Tessera v0.0.x: agent_context payload soft-cap so a single task.get fits
+// inside an agent's prompt window without surprises. We serialize the
+// candidate, and if it busts the cap we shed events first (more numerous,
+// lower per-item value), then related_tasks. Pagination endpoints let the
+// caller fetch the trimmed tail explicitly.
+const AGENT_CONTEXT_MAX_BYTES = 32 * 1024;
+
+function encodePageToken(offset: number): string {
+  // Opaque to callers — just an offset for v0. We base64url it so it's
+  // visibly an opaque token rather than a number the client is tempted to
+  // arithmetic on.
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString(
+    'base64url',
+  );
+}
+
+export function decodePageToken(token: string): { offset: number } | null {
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(token, 'base64url').toString('utf8'),
+    );
+    if (
+      decoded &&
+      typeof decoded === 'object' &&
+      typeof decoded.o === 'number' &&
+      Number.isInteger(decoded.o) &&
+      decoded.o >= 0
+    ) {
+      return { offset: decoded.o };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Row → wire-shape conversion
 // ────────────────────────────────────────────────────────────────────────
@@ -112,12 +148,106 @@ async function buildAgentContext(
     .orderBy(desc(events.createdAt))
     .limit(RECENT_EVENTS_LIMIT);
 
-  return {
-    related_tasks: [], // Future: populate from a 'related_to' edge.
-    recent_events: recentRows.map(rowToEvent),
-    repo_refs: [], // Future: populate from task.update_context.
-    truncated: false,
+  // Related-tasks discovery is Week 5+ — for now this is always empty, but
+  // we still run truncation through it so the shape stays stable as soon
+  // as discovery lands.
+  const relatedTasks: Task[] = [];
+
+  let recentEvents = recentRows.map(rowToEvent);
+  let truncated = false;
+  let nextEventOffset: number | null = null;
+  let nextRelatedOffset: number | null = null;
+
+  // Greedy shed: drop oldest events first (we sorted desc), then trim
+  // related_tasks. If we ever blow past the cap with just the task body we
+  // accept it — task fields are non-negotiable.
+  const fits = (events: Event[], related: Task[]): boolean => {
+    const candidate = {
+      related_tasks: related,
+      recent_events: events,
+      repo_refs: [],
+      truncated: false,
+    };
+    return Buffer.byteLength(JSON.stringify(candidate), 'utf8') <=
+      AGENT_CONTEXT_MAX_BYTES;
   };
+
+  while (!fits(recentEvents, relatedTasks) && recentEvents.length > 0) {
+    recentEvents = recentEvents.slice(0, recentEvents.length - 1);
+    truncated = true;
+    nextEventOffset = recentEvents.length;
+  }
+  while (!fits(recentEvents, relatedTasks) && relatedTasks.length > 0) {
+    relatedTasks.pop();
+    truncated = true;
+    nextRelatedOffset = relatedTasks.length;
+  }
+
+  return {
+    related_tasks: relatedTasks,
+    recent_events: recentEvents,
+    repo_refs: [],
+    truncated,
+    next_page_tokens: truncated
+      ? {
+          related_tasks:
+            nextRelatedOffset !== null
+              ? encodePageToken(nextRelatedOffset)
+              : null,
+          recent_events:
+            nextEventOffset !== null
+              ? encodePageToken(nextEventOffset)
+              : null,
+        }
+      : undefined,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Pagination helpers (powering /tasks/:id/related_tasks and /tasks/:id/events)
+// ────────────────────────────────────────────────────────────────────────
+
+const PAGE_DEFAULT_LIMIT = 20;
+const PAGE_MAX_LIMIT = 100;
+
+function clampPageLimit(limit: number | undefined): number {
+  if (limit === undefined) return PAGE_DEFAULT_LIMIT;
+  return Math.max(1, Math.min(limit, PAGE_MAX_LIMIT));
+}
+
+export async function listTaskEvents(
+  db: SelectClient,
+  args: { taskId: string; limit?: number; offset?: number },
+): Promise<{ events: Event[]; next_page_token: string | null }> {
+  // taskId existence check is the route adapter's job. Here we just paginate.
+  const limit = clampPageLimit(args.limit);
+  const offset = Math.max(0, args.offset ?? 0);
+
+  // Fetch limit+1 to know whether there's a next page without a count query.
+  const rows = await db
+    .select()
+    .from(events)
+    .where(eq(events.taskId, args.taskId))
+    .orderBy(desc(events.createdAt))
+    .limit(limit + 1)
+    .offset(offset);
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    events: page.map(rowToEvent),
+    next_page_token: hasMore ? encodePageToken(offset + limit) : null,
+  };
+}
+
+export async function listRelatedTasks(
+  _db: SelectClient,
+  _args: { taskId: string; limit?: number; offset?: number },
+): Promise<{ tasks: Task[]; next_page_token: string | null }> {
+  // Discovery logic lands in Week 5+. Endpoint exists now so the
+  // pagination contract is locked at the same moment as agent_context
+  // truncation — clients only need to learn one shape.
+  return { tasks: [], next_page_token: null };
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -274,7 +404,11 @@ export async function updateTaskStatus(
           taskId: args.req.task_id,
           actorId: args.actorId,
           kind: 'status_changed',
-          payload: { from: previousStatus, to: args.req.status },
+          payload: {
+            from: previousStatus,
+            to: args.req.status,
+            ...(args.req.notes !== undefined ? { notes: args.req.notes } : {}),
+          },
           operationId: args.req.operation_id,
           createdAt: now,
         })
