@@ -125,7 +125,11 @@ curl -fsS -H "Authorization: Bearer $NEW_TOKEN" \
   "http://localhost:3001/api/agents"
 ```
 
-You should get back a JSON list of agents (possibly empty), not a 401.
+You should get back `200 OK` with a JSON list of agents (possibly
+empty). If the Bearer token is present but invalid, the auth middleware
+returns `403 invalid_token`; `401` is reserved for a missing or
+malformed `Authorization` header (see
+`apps/server/src/auth/middleware.ts`).
 
 ### 5. Verify the old token is rejected
 
@@ -135,10 +139,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://localhost:3001/api/agents
 ```
 
-This should print `401`. If it prints `200`, the recreate didn't pick
-up the new `.env` — repeat step 3. (Note: we drop `-f` here on purpose
-— `-f` makes curl exit non-zero on 4xx, which would mask the very
-behavior we're checking for.)
+This should print `403` (the auth middleware's `invalid_token`
+response). If it prints `200`, the recreate didn't pick up the new
+`.env` — repeat step 3. (Note: we drop `-f` here on purpose — `-f`
+makes curl exit non-zero on 4xx, which would mask the very behavior
+we're checking for.)
 
 ### 6. Distribute the new token
 
@@ -148,7 +153,7 @@ means updating their MCP client config or environment, then restarting
 them.
 
 The old token is dead at this point. Anyone still using it will hit
-401s and need the new one.
+`403 invalid_token` and need the new one.
 
 ## Rotating an agent's token
 
