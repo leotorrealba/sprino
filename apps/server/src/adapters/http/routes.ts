@@ -20,10 +20,16 @@ import { Hono } from 'hono';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import {
+  ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskUpdateStatusReqSchema,
 } from '../../domain/index.ts';
+import {
+  ProjectNotFoundError,
+  getProject,
+  listProjects,
+} from '../../service/projects.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -44,6 +50,40 @@ type Env = {
 
 export function buildHttpRoutes(): Hono<Env> {
   const api = new Hono<Env>();
+
+  api.get('/projects', async (c) => {
+    try {
+      const res = await listProjects(c.get('db'));
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/projects/resolve', async (c) => {
+    try {
+      const req = ProjectGetReqSchema.parse({
+        slug: c.req.query('slug') || undefined,
+        repo_path: c.req.query('repo_path') || undefined,
+      });
+      const res = await getProject(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/projects/:id', async (c) => {
+    try {
+      const req = ProjectGetReqSchema.parse({
+        project_id: c.req.param('id'),
+      });
+      const res = await getProject(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
 
   // Sprino-specific list extension — see service/tasks.ts.listTasks.
   // Not exposed via /mcp to keep the canonical protocol minimal.
@@ -115,6 +155,9 @@ function errorResponse(c: any, err: unknown): Response {
       { error: 'validation_error', details: err.issues },
       400,
     );
+  }
+  if (err instanceof ProjectNotFoundError) {
+    return c.json({ error: 'project_not_found', ref: err.ref }, 404);
   }
   if (err instanceof TaskNotFoundError) {
     return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Task, TaskStatus } from '@sprino/protocol-types';
+import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
 
 type LoadState = 'idle' | 'loading' | 'error';
 
@@ -31,50 +31,71 @@ function uuidv7(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function getConfig(): { token: string; projectId: string } {
+function getToken(): string {
   const token =
     localStorage.getItem('sprino_token') ?? prompt('Sprino bearer token') ?? '';
   if (token) localStorage.setItem('sprino_token', token);
 
-  const projectId =
-    localStorage.getItem('sprino_project_id') ??
-    prompt(
-      'Sprino project_id',
-      '018c3e7a-0002-7000-8000-000000000001',
-    ) ??
-    '';
-  if (projectId) localStorage.setItem('sprino_project_id', projectId);
-
-  return { token, projectId };
+  return token;
 }
 
 export function App() {
-  const config = useMemo(getConfig, []);
+  const token = useMemo(getToken, []);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    () => localStorage.getItem('sprino_project_id') ?? '',
+  );
   const [tasks, setTasks] = useState<Task[]>([]);
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const activeProject = projects.find((p) => p.id === selectedProjectId);
 
   const fetchAuth = useCallback(
     (path: string, init: RequestInit = {}): Promise<Response> =>
       fetch(path, {
         ...init,
         headers: {
-          authorization: `Bearer ${config.token}`,
+          authorization: `Bearer ${token}`,
           'content-type': 'application/json',
           ...(init.headers ?? {}),
         },
       }),
-    [config.token],
+    [token],
   );
 
+  const refreshProjects = useCallback(async () => {
+    setError(null);
+    try {
+      const r = await fetchAuth('/api/projects');
+      if (!r.ok) throw new Error(`projects failed: ${r.status}`);
+      const j = (await r.json()) as { projects: Project[] };
+      setProjects(j.projects);
+
+      setSelectedProjectId((current) => {
+        const saved = current || localStorage.getItem('sprino_project_id') || '';
+        if (saved && j.projects.some((p) => p.id === saved)) return saved;
+        const first = j.projects[0]?.id ?? '';
+        if (first) localStorage.setItem('sprino_project_id', first);
+        return first;
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [fetchAuth]);
+
   const refresh = useCallback(async () => {
+    if (!selectedProjectId) {
+      setTasks([]);
+      return;
+    }
+
     setLoad('loading');
     setError(null);
     try {
       const r = await fetchAuth(
-        `/api/tasks?project_id=${encodeURIComponent(config.projectId)}`,
+        `/api/tasks?project_id=${encodeURIComponent(selectedProjectId)}`,
       );
       if (!r.ok) throw new Error(`list failed: ${r.status}`);
       const j = (await r.json()) as { tasks: Task[] };
@@ -84,7 +105,11 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       setLoad('error');
     }
-  }, [config.projectId, fetchAuth]);
+  }, [selectedProjectId, fetchAuth]);
+
+  useEffect(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
 
   useEffect(() => {
     void refresh();
@@ -95,14 +120,14 @@ export function App() {
 
   const createTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || busy) return;
+    if (!newTitle.trim() || !selectedProjectId || busy) return;
     setBusy(true);
     try {
       const r = await fetchAuth('/api/tasks', {
         method: 'POST',
         body: JSON.stringify({
           operation_id: uuidv7(),
-          project_id: config.projectId,
+          project_id: selectedProjectId,
           title: newTitle.trim(),
         }),
       });
@@ -143,27 +168,61 @@ export function App() {
   return (
     <div className="min-h-screen text-slate-800">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-6 py-4">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
             <p className="text-xs text-slate-500">
-              Tessera v0.0.1 reference impl
+              Tessera v0.0.2 reference impl
             </p>
           </div>
-          <button
-            onClick={() => {
-              localStorage.removeItem('sprino_token');
-              localStorage.removeItem('sprino_project_id');
-              window.location.reload();
-            }}
-            className="text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
-          >
-            reset connection
-          </button>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedProjectId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedProjectId(id);
+                localStorage.setItem('sprino_project_id', id);
+              }}
+              className="h-9 min-w-40 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
+            >
+              {projects.length === 0 ? (
+                <option value="">No projects</option>
+              ) : (
+                projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.display_name}
+                  </option>
+                ))
+              )}
+            </select>
+            <button
+              onClick={() => {
+                localStorage.removeItem('sprino_token');
+                localStorage.removeItem('sprino_project_id');
+                window.location.reload();
+              }}
+              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+            >
+              reset connection
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-6 py-8">
+      <main className="mx-auto max-w-4xl px-6 py-8">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700">
+              {activeProject?.display_name ?? 'Project'}
+            </h2>
+            {activeProject?.repo_path && (
+              <p className="mt-1 max-w-full truncate font-mono text-[11px] text-slate-400">
+                {activeProject.repo_path}
+              </p>
+            )}
+          </div>
+        </div>
+
         <form
           onSubmit={createTask}
           className="mb-8 flex gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
@@ -176,7 +235,7 @@ export function App() {
           />
           <button
             type="submit"
-            disabled={busy || !newTitle.trim()}
+            disabled={busy || !newTitle.trim() || !selectedProjectId}
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
           >
             create
@@ -192,13 +251,7 @@ export function App() {
         {load === 'loading' && tasks.length === 0 ? (
           <p className="text-sm text-slate-400">loading…</p>
         ) : tasks.length === 0 ? (
-          <p className="text-sm text-slate-400">
-            no tasks yet — create one above, or via{' '}
-            <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">
-              sprino.task.create
-            </code>{' '}
-            in MCP.
-          </p>
+          <p className="text-sm text-slate-400">no tasks yet</p>
         ) : (
           <ul className="space-y-2">
             {tasks.map((t) => (

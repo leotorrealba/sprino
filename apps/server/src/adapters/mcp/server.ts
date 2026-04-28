@@ -2,13 +2,13 @@
  * MCP-over-HTTP adapter — minimal JSON-RPC 2.0 dispatch on POST /mcp.
  *
  * Supports two methods:
- *   - tools/list        → returns the 3 Tessera v0.0.1 tool definitions
- *   - tools/call        → dispatches sprino.task.{create,get,update_status}
+ *   - tools/list        → returns Tessera task/project tool definitions
+ *   - tools/call        → dispatches sprino.{task,project} tools
  *
  * Per the locked architecture (eng review): this is a thin adapter over
  * service/tasks.ts. Same idempotency, same transactions, same error codes.
  *
- * v0.0.1 scope:
+ * v0.x scope:
  *   - No SSE / streaming responses
  *   - No session state
  *   - No resources, prompts, or sampling
@@ -22,10 +22,16 @@ import { ZodError } from 'zod';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import {
+  ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskUpdateStatusReqSchema,
 } from '../../domain/index.ts';
+import {
+  ProjectNotFoundError,
+  getProject,
+  listProjects,
+} from '../../service/projects.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -56,15 +62,44 @@ interface JsonRpcResponse {
 
 const TOOL_DEFINITIONS = [
   {
-    name: 'sprino.task.create',
+    name: 'sprino.project.list',
     description:
-      'Create a task in a project. Idempotent via operation_id (UUIDv7).',
+      'List projects known to Sprino. Use this before task.create when no repo context is available.',
     inputSchema: {
       type: 'object',
-      required: ['operation_id', 'project_id', 'title'],
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: 'sprino.project.get',
+    description:
+      'Fetch a project by project_id, slug, or repo_path. Repo paths are used for week 2 multi-repo auto-detection.',
+    inputSchema: {
+      type: 'object',
+      anyOf: [
+        { required: ['project_id'] },
+        { required: ['slug'] },
+        { required: ['repo_path'] },
+      ],
+      properties: {
+        project_id: { type: 'string', format: 'uuid' },
+        slug: { type: 'string', minLength: 1, maxLength: 64 },
+        repo_path: { type: 'string', minLength: 1 },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.create',
+    description:
+      'Create a task in a project. Idempotent via operation_id (UUIDv7). project_id may be inferred from repo_path by the stdio shim.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'title'],
       properties: {
         operation_id: { type: 'string', format: 'uuid' },
         project_id: { type: 'string', format: 'uuid' },
+        repo_path: { type: 'string', minLength: 1 },
         title: { type: 'string', minLength: 1, maxLength: 280 },
         description: { type: 'string', maxLength: 16384 },
         assignee_id: { type: ['string', 'null'], format: 'uuid' },
@@ -163,6 +198,15 @@ async function callTool(
   const actor: ActorEntry = c.get('actor');
 
   switch (name) {
+    case 'sprino.project.list': {
+      const res = await listProjects(db);
+      return wrapToolResult(res);
+    }
+    case 'sprino.project.get': {
+      const req = ProjectGetReqSchema.parse(args ?? {});
+      const res = await getProject(db, { req });
+      return wrapToolResult(res);
+    }
     case 'sprino.task.create': {
       const req = TaskCreateReqSchema.parse(args);
       const res = await createTask(db, { req, actorId: actor.id });
@@ -223,6 +267,9 @@ function translateError(
   }
   if (err instanceof RpcMethodError) {
     return rpcError(id, err.code, err.message);
+  }
+  if (err instanceof ProjectNotFoundError) {
+    return rpcError(id, -32004, 'project_not_found', { ref: err.ref });
   }
   if (err instanceof TaskNotFoundError) {
     return rpcError(id, -32004, 'task_not_found', { task_id: err.taskId });

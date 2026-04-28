@@ -1,5 +1,5 @@
 /**
- * Tasks service — implements Tessera v0.0.1 verbs.
+ * Tasks service — implements Tessera task verbs.
  *
  *   task.create        ──► event(kind=created)        + INSERT tasks (version=1)
  *   task.get           ──► SELECT task + recent_events + agent_context
@@ -50,6 +50,7 @@ import {
   hashRequest,
   recordOperation,
 } from './idempotency.ts';
+import { resolveProject } from './projects.ts';
 
 export class TaskNotFoundError extends Error {
   constructor(public readonly taskId: string) {
@@ -110,9 +111,9 @@ async function buildAgentContext(
     .limit(RECENT_EVENTS_LIMIT);
 
   return {
-    related_tasks: [], // v0.0.1: empty. v0.0.2 will populate from a 'related_to' edge.
+    related_tasks: [], // Future: populate from a 'related_to' edge.
     recent_events: recentRows.map(rowToEvent),
-    repo_refs: [], // v0.0.1: empty. v0.0.2 will populate from task.update_context.
+    repo_refs: [], // Future: populate from task.update_context.
     truncated: false,
   };
 }
@@ -130,6 +131,11 @@ export async function createTask(
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
   if (cached) return cached as TaskCreateRes;
 
+  const project = await resolveProject(db, {
+    project_id: args.req.project_id,
+    repo_path: args.req.repo_path,
+  });
+
   const taskId = uuidv7();
   const eventId = uuidv7();
   const now = new Date();
@@ -144,7 +150,7 @@ export async function createTask(
       .insert(tasks)
       .values({
         id: taskId,
-        projectId: args.req.project_id,
+        projectId: project.id,
         title: args.req.title,
         description: args.req.description ?? '',
         status: 'todo',
@@ -191,7 +197,7 @@ export async function createTask(
 }
 
 /**
- * Sprino-specific list extension. NOT a Tessera v0.0.1 verb — the canonical
+ * Sprino-specific list extension. NOT a canonical Tessera verb — the canonical
  * protocol exposes only task.create, task.get, task.update_status. The list
  * shape will be standardized in Tessera v0.0.2 (ordering, pagination, filters).
  * Until then this powers the local dogfood UI only.

@@ -1,6 +1,6 @@
 {
   "name": "sprino",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Reference implementation of Tessera (AI-native project state protocol)",
   "license": "AGPL-3.0-or-later",

@@ -1,5 +1,5 @@
 /**
- * Tessera v0.0.1 conformance: runs the canonical request/response fixtures
+ * Tessera v0.0.2 conformance: runs the canonical request/response fixtures
  * from `../tessera/conformance/fixtures/` against the actual server.
  *
  * The fixtures form a sequence: create → get → update_status. Each later
@@ -17,6 +17,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { db } from '../src/db/client.ts';
+import { projects } from '../src/db/schema.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
@@ -35,6 +37,8 @@ function readFixture(name: string): unknown {
 
 const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SECOND_PROJECT_ID = '018c3e7a-0002-7000-8000-000000000002';
+const SECOND_PROJECT_REPO = '/Users/leotorrealba/Development/tessera';
 
 function bearer(body: unknown, method = 'POST'): RequestInit {
   return {
@@ -47,7 +51,7 @@ function bearer(body: unknown, method = 'POST'): RequestInit {
   };
 }
 
-describe('Tessera v0.0.1 conformance — happy path sequence', () => {
+describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
   it('runs create → get → update_status against the canonical fixtures', async () => {
     const app = buildTestApp();
 
@@ -266,7 +270,7 @@ describe('Tessera v0.0.1 conformance — happy path sequence', () => {
 });
 
 describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () => {
-  it('tools/list returns the 3 Tessera v0.0.1 verbs', async () => {
+  it('tools/list returns the Tessera task verbs and week 2 project verbs', async () => {
     const app = buildTestApp();
     const resp = await app.fetch(
       new Request(
@@ -280,6 +284,8 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       result: { tools: Array<{ name: string }> };
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
+      'sprino.project.get',
+      'sprino.project.list',
       'sprino.task.create',
       'sprino.task.get',
       'sprino.task.update_status',
@@ -315,5 +321,77 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
     expect(sc.task.status).toBe('todo');
     expect(sc.task.version).toBe(1);
     expect(sc.event.kind).toBe('created');
+  });
+});
+
+describe('Tessera v0.0.2 project scoping', () => {
+  async function seedSecondProject(): Promise<void> {
+    await db.insert(projects).values({
+      id: SECOND_PROJECT_ID,
+      slug: 'tessera',
+      displayName: 'Tessera',
+      repoPath: SECOND_PROJECT_REPO,
+    });
+  }
+
+  it('GET /api/projects lists available projects in stable slug order', async () => {
+    const app = buildTestApp();
+    await seedSecondProject();
+
+    const resp = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      projects: Array<{ id: string; slug: string; display_name: string }>;
+    };
+    expect(body.projects.map((p) => p.slug)).toEqual(['sprino', 'tessera']);
+    expect(body.projects).toContainEqual(
+      expect.objectContaining({
+        id: SECOND_PROJECT_ID,
+        slug: 'tessera',
+        display_name: 'Tessera',
+      }),
+    );
+  });
+
+  it('MCP task.create resolves project from repo_path when project_id is omitted', async () => {
+    const app = buildTestApp();
+    await seedSecondProject();
+
+    const resp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.task.create',
+            arguments: {
+              operation_id: '018c3e7a-0006-7000-8000-000000000001',
+              repo_path: SECOND_PROJECT_REPO,
+              title: 'Track Tessera schema bump',
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      result: {
+        structuredContent: { task: { project_id: string; title: string } };
+      };
+    };
+    expect(body.result.structuredContent.task.project_id).toBe(
+      SECOND_PROJECT_ID,
+    );
+    expect(body.result.structuredContent.task.title).toBe(
+      'Track Tessera schema bump',
+    );
   });
 });

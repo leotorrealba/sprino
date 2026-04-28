@@ -1,5 +1,5 @@
 /**
- * @sprino/protocol-types — shared wire types for Tessera v0.0.1.
+ * @sprino/protocol-types — shared wire types for Tessera v0.0.2.
  *
  * This package is the single source of truth for the runtime-validated
  * wire shape used by both `apps/server` and `apps/web`. It mirrors the
@@ -16,6 +16,11 @@ import { z } from 'zod';
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
+const projectSlug = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/);
 
 // ────────────────────────────────────────────────────────────────────────
 // Resources
@@ -36,11 +41,7 @@ export type Actor = z.infer<typeof ActorSchema>;
 
 export const ProjectSchema = z.object({
   id: uuid,
-  slug: z
-    .string()
-    .min(1)
-    .max(64)
-    .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/),
+  slug: projectSlug,
   display_name: z.string().min(1).max(200),
   repo_path: z.string().nullable(),
   created_at: isoDateTime,
@@ -106,16 +107,32 @@ export const AgentContextSchema = z.object({
 export type AgentContext = z.infer<typeof AgentContextSchema>;
 
 // ────────────────────────────────────────────────────────────────────────
-// Verbs (v0.0.1: task.create, task.get, task.update_status)
+// Verbs (v0.0.2: projects + task.create repo auto-resolution)
 // ────────────────────────────────────────────────────────────────────────
 
-export const TaskCreateReqSchema = z.object({
-  operation_id: uuid,
-  project_id: uuid,
-  title: z.string().min(1).max(280),
-  description: z.string().max(16384).optional(),
-  assignee_id: uuid.nullable().optional(),
-});
+export const ProjectGetReqSchema = z
+  .object({
+    project_id: uuid.optional(),
+    slug: projectSlug.optional(),
+    repo_path: z.string().min(1).optional(),
+  })
+  .refine((req) => req.project_id || req.slug || req.repo_path, {
+    message: 'one of project_id, slug, or repo_path is required',
+  });
+export type ProjectGetReq = z.infer<typeof ProjectGetReqSchema>;
+
+export const TaskCreateReqSchema = z
+  .object({
+    operation_id: uuid,
+    project_id: uuid.optional(),
+    repo_path: z.string().min(1).optional(),
+    title: z.string().min(1).max(280),
+    description: z.string().max(16384).optional(),
+    assignee_id: uuid.nullable().optional(),
+  })
+  .refine((req) => req.project_id || req.repo_path, {
+    message: 'one of project_id or repo_path is required',
+  });
 export type TaskCreateReq = z.infer<typeof TaskCreateReqSchema>;
 
 export const TaskCreateResSchema = z.object({
@@ -124,6 +141,16 @@ export const TaskCreateResSchema = z.object({
   event: EventSchema,
 });
 export type TaskCreateRes = z.infer<typeof TaskCreateResSchema>;
+
+export const ProjectListResSchema = z.object({
+  projects: z.array(ProjectSchema),
+});
+export type ProjectListRes = z.infer<typeof ProjectListResSchema>;
+
+export const ProjectGetResSchema = z.object({
+  project: ProjectSchema,
+});
+export type ProjectGetRes = z.infer<typeof ProjectGetResSchema>;
 
 export const TaskGetReqSchema = z.object({ task_id: uuid });
 export type TaskGetReq = z.infer<typeof TaskGetReqSchema>;
@@ -148,4 +175,4 @@ export const TaskUpdateStatusResSchema = z.object({
 });
 export type TaskUpdateStatusRes = z.infer<typeof TaskUpdateStatusResSchema>;
 
-export const PROTOCOL_VERSION = 'tessera/v0.0.1';
+export const PROTOCOL_VERSION = 'tessera/v0.0.2';

@@ -1,5 +1,5 @@
 /**
- * Drizzle schema for Sprino — implements Tessera v0.0.1 resources.
+ * Drizzle schema for Sprino — implements Tessera resources.
  *
  * Resource → table:
  *   Actor    → actors
@@ -71,6 +71,7 @@ export const projects = pgTable(
   },
   (t) => ({
     slugIdx: index('projects_slug_idx').on(t.slug),
+    repoPathIdx: index('projects_repo_path_idx').on(t.repoPath),
   }),
 );
 

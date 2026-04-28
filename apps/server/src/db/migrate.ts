@@ -26,8 +26,16 @@ interface ActorEntry {
   // token is intentionally NOT persisted — it's a runtime auth secret.
 }
 
+interface ProjectEntry {
+  id: string;
+  slug: string;
+  display_name: string;
+  repo_path?: string | null;
+}
+
 async function seed(): Promise<void> {
   const json = process.env.SPRINO_ACTORS_JSON;
+  const projectsJson = process.env.SPRINO_PROJECTS_JSON;
   const projectId = process.env.SPRINO_DEFAULT_PROJECT_ID;
   const projectSlug = process.env.SPRINO_DEFAULT_PROJECT_SLUG;
 
@@ -48,7 +56,28 @@ async function seed(): Promise<void> {
     console.log(`Seeded ${parsed.length} actor(s) from SPRINO_ACTORS_JSON`);
   }
 
-  if (projectId && projectSlug) {
+  if (projectsJson) {
+    const parsed = JSON.parse(projectsJson) as ProjectEntry[];
+    for (const p of parsed) {
+      await db
+        .insert(projects)
+        .values({
+          id: p.id,
+          slug: p.slug,
+          displayName: p.display_name,
+          repoPath: p.repo_path ?? null,
+        })
+        .onConflictDoUpdate({
+          target: projects.id,
+          set: {
+            slug: p.slug,
+            displayName: p.display_name,
+            repoPath: p.repo_path ?? null,
+          },
+        });
+    }
+    console.log(`Seeded ${parsed.length} project(s) from SPRINO_PROJECTS_JSON`);
+  } else if (projectId && projectSlug) {
     await db
       .insert(projects)
       .values({

@@ -34,6 +34,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Week-by-week d
 
 - **v0.0.0** — repo scaffold (this commit)
 - **v0.0.1** (week 1) — "Hello Task" slice: protocol fixtures, Postgres schema, Hono backend, MCP routes, single-page frontend, dogfood loop closed
+- **v0.0.2** (week 2) — project scoping + multi-repo: project list/get, repo-aware MCP task creation, frontend project switcher
 - **v0.0.x** — vertical slices weekly through week 8
 - **v0.1.0** (week 8) — first public release, self-host walkthrough, Tessera v0.1 milestone
 

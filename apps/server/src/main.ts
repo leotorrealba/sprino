@@ -40,7 +40,7 @@ function buildApp(): Hono<Env> {
   });
 
   app.get('/healthz', (c) =>
-    c.json({ ok: true, version: '0.0.1', protocol: 'tessera/v0.0.1' }),
+    c.json({ ok: true, version: '0.0.2', protocol: 'tessera/v0.0.2' }),
   );
 
   // /api/* — REST. Auth required.
