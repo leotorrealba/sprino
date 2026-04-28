@@ -1,18 +1,28 @@
 /**
  * Activity feed for the currently selected project.
  *
- * Polls GET /api/events every 3s (matches the task-list cadence in App.tsx;
- * SSE/LISTEN-NOTIFY is a v0.2 milestone). Renders human-readable lines:
+ * Transport: REST initial load → SSE primary → 10s polling fallback.
+ *   1. Mount: fetch /api/events for the most recent 50 events.
+ *   2. Mint a short-lived ticket via POST /api/events/stream-ticket
+ *      (EventSource cannot send Authorization headers, so we use a
+ *      project-bound HMAC ticket in the query string).
+ *   3. Open EventSource at /api/events/stream — append new events live,
+ *      track the cursor in lastEventIdRef so a reconnect can resume.
+ *   4. On EventSource error, close it and fall back to polling every 10s.
+ *      Try to reopen the stream on each fallback tick — if it succeeds,
+ *      we drop the polling interval.
  *
+ * Renders human-readable lines:
  *   • Leo created Task "fix the bug"
  *   • Claude marked Task "fix the bug" as doing
  *
  * Why this lives in /components and not inline in App.tsx:
  *   App.tsx is already the project + task + token shell. Keeping the feed
- *   self-contained makes it the obvious thing to swap out when SSE lands.
+ *   self-contained makes it the obvious thing to evolve when LISTEN/NOTIFY
+ *   lands in v0.2.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { EventWithActor, EventKind } from '@sprino/protocol-types';
 
 interface ActivityFeedProps {
@@ -20,7 +30,9 @@ interface ActivityFeedProps {
   projectId: string;
 }
 
-const POLL_MS = 3000;
+const FALLBACK_POLL_MS = 10_000;
+const MAX_EVENTS = 100;
+type Transport = 'connecting' | 'sse' | 'polling';
 
 function describe(event: EventWithActor): string {
   const taskLabel = `Task "${event.task.title}"`;
@@ -62,42 +74,200 @@ export function ActivityFeed({ token, projectId }: ActivityFeedProps) {
   const [events, setEvents] = useState<EventWithActor[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [transport, setTransport] = useState<Transport>('connecting');
 
-  const refresh = useCallback(async () => {
-    if (!token || !projectId) {
-      setEvents([]);
-      return;
-    }
-    try {
-      const r = await fetch(
-        `/api/events?project_id=${encodeURIComponent(projectId)}&limit=50`,
-        {
-          headers: { authorization: `Bearer ${token}` },
-        },
-      );
-      if (!r.ok) throw new Error(`events failed: ${r.status}`);
-      const j = (await r.json()) as { events: EventWithActor[] };
-      setEvents(j.events);
-      setError(null);
-      setLoaded(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+  // Refs so async callbacks see the latest cursor / live connection
+  // without forcing rerenders on every event.
+  const lastEventIdRef = useRef<string | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
+  const cancelledRef = useRef(false);
+
+  const appendEvent = useCallback((evt: EventWithActor) => {
+    setEvents((prev) => {
+      if (prev.some((e) => e.id === evt.id)) return prev;
+      const next = [evt, ...prev];
+      return next.length > MAX_EVENTS ? next.slice(0, MAX_EVENTS) : next;
+    });
+    lastEventIdRef.current = evt.id;
+  }, []);
+
+  const initialLoad = useCallback(async () => {
+    const r = await fetch(
+      `/api/events?project_id=${encodeURIComponent(projectId)}&limit=50`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    if (!r.ok) throw new Error(`events failed: ${r.status}`);
+    const j = (await r.json()) as { events: EventWithActor[] };
+    setEvents(j.events);
+    // events are returned newest-first; the cursor is the newest id.
+    lastEventIdRef.current = j.events[0]?.id ?? null;
+    setLoaded(true);
+    setError(null);
   }, [token, projectId]);
 
+  const fetchTicket = useCallback(async (): Promise<string> => {
+    const r = await fetch('/api/events/stream-ticket', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (!r.ok) throw new Error(`stream-ticket failed: ${r.status}`);
+    const j = (await r.json()) as { ticket: string };
+    return j.ticket;
+  }, [token, projectId]);
+
+  const closeSse = useCallback(() => {
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // Defined later (declared as ref to allow mutual reference between
+  // openSse and the polling fallback).
+  const openSseRef = useRef<() => void>(() => undefined);
+
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) return; // already polling
+    setTransport('polling');
+    pollTimerRef.current = window.setInterval(() => {
+      void initialLoad().catch((e) =>
+        setError(e instanceof Error ? e.message : String(e)),
+      );
+      // Optimistically try to recover SSE on each tick.
+      openSseRef.current();
+    }, FALLBACK_POLL_MS);
+  }, [initialLoad]);
+
+  const openSse = useCallback(async () => {
+    if (cancelledRef.current) return;
+    if (esRef.current) return; // already open / connecting
+    let ticket: string;
+    try {
+      ticket = await fetchTicket();
+    } catch (e) {
+      if (cancelledRef.current) return;
+      setError(
+        e instanceof Error ? e.message : 'Unable to connect to live updates.',
+      );
+      // Ticket fetch failed — fall back to polling so the user still gets
+      // updates instead of a stuck "connecting…" indicator.
+      startPolling();
+      return;
+    }
+    if (cancelledRef.current) return;
+    const params = new URLSearchParams({
+      project_id: projectId,
+      ticket,
+    });
+    if (lastEventIdRef.current) {
+      params.set('last_event_id', lastEventIdRef.current);
+    }
+    const es = new EventSource(`/api/events/stream?${params.toString()}`);
+    esRef.current = es;
+
+    es.onopen = () => {
+      if (cancelledRef.current) {
+        es.close();
+        return;
+      }
+      stopPolling();
+      setTransport('sse');
+      setError(null);
+    };
+
+    es.onmessage = (msg) => {
+      if (!msg.data) return;
+      try {
+        const evt = JSON.parse(msg.data) as EventWithActor;
+        appendEvent(evt);
+      } catch {
+        // ignore malformed payloads
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      esRef.current = null;
+      if (cancelledRef.current) return;
+      // Fall back to polling; openSse will be retried by the polling loop.
+      startPolling();
+    };
+  }, [appendEvent, fetchTicket, projectId, startPolling, stopPolling]);
+
+  // Keep ref in sync so startPolling can call the latest openSse.
+  openSseRef.current = () => {
+    void openSse();
+  };
+
   useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), POLL_MS);
-    return () => clearInterval(t);
-  }, [refresh]);
+    if (!token || !projectId) {
+      setEvents([]);
+      setLoaded(false);
+      setTransport('connecting');
+      return;
+    }
+    cancelledRef.current = false;
+    setLoaded(false);
+    setTransport('connecting');
+
+    void (async () => {
+      try {
+        await initialLoad();
+        await openSse();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        startPolling();
+      }
+    })();
+
+    return () => {
+      cancelledRef.current = true;
+      closeSse();
+      stopPolling();
+    };
+  }, [token, projectId, initialLoad, openSse, startPolling, closeSse, stopPolling]);
 
   if (!projectId) return null;
 
+  const transportLabel =
+    transport === 'sse'
+      ? 'live'
+      : transport === 'polling'
+        ? 'polling'
+        : 'connecting…';
+
   return (
     <section className="mt-8">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        Activity
-      </h2>
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Activity
+        </h2>
+        <span
+          className={`text-[10px] font-medium uppercase tracking-wide ${
+            transport === 'sse'
+              ? 'text-emerald-600'
+              : transport === 'polling'
+                ? 'text-amber-600'
+                : 'text-slate-400'
+          }`}
+          title={`transport: ${transport}`}
+        >
+          {transport === 'sse' && '● '}
+          {transportLabel}
+        </span>
+      </div>
 
       {error && (
         <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
@@ -142,3 +312,4 @@ export function ActivityFeed({ token, projectId }: ActivityFeedProps) {
     </section>
   );
 }
+

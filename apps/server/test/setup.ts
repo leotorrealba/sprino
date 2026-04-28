@@ -30,6 +30,7 @@ import { closeDb, db } from '../src/db/client.ts';
 import type { Db } from '../src/db/client.ts';
 import { actors, projects } from '../src/db/schema.ts';
 import { buildHttpRoutes } from '../src/adapters/http/routes.ts';
+import { sseHandler } from '../src/adapters/http/sse.ts';
 import { buildMcpRoutes } from '../src/adapters/mcp/server.ts';
 
 // IDs and tokens that the conformance fixtures reference.
@@ -47,6 +48,10 @@ export function buildTestApp(): Hono<Env> {
     c.set('db', db);
     await next();
   });
+
+  // Mirror main.ts: SSE route MUST be registered before /api so its
+  // ticket auth wins over the global Bearer middleware.
+  app.get('/api/events/stream', sseHandler);
 
   const api = new Hono<Env>();
   api.use('*', tokenAuth);

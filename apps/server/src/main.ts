@@ -22,6 +22,7 @@ import { tokenAuth } from './auth/middleware.ts';
 import { db, closeDb } from './db/client.ts';
 import type { Db } from './db/client.ts';
 import { buildHttpRoutes } from './adapters/http/routes.ts';
+import { sseHandler } from './adapters/http/sse.ts';
 import { buildMcpRoutes } from './adapters/mcp/server.ts';
 
 type Env = {
@@ -42,6 +43,15 @@ function buildApp(): Hono<Env> {
   app.get('/healthz', (c) =>
     c.json({ ok: true, version: '0.0.2', protocol: 'tessera/v0.0.2' }),
   );
+
+  // /api/events/stream — SSE feed. Mounted DIRECTLY on the app (NOT under
+  // the `api` router) so it bypasses the global Bearer middleware. Auth is
+  // a short-lived signed ticket on the query string, verified inside the
+  // handler. Order matters: this route MUST be registered before
+  // `app.route('/api', api)` below — Hono matches routes in registration
+  // order, and we want this specific path to win over the catch-all
+  // Bearer-protected mount.
+  app.get('/api/events/stream', sseHandler);
 
   // /api/* — REST. Auth required.
   const api = new Hono<Env>();

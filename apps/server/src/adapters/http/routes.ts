@@ -41,6 +41,7 @@ import {
 } from '../../service/projects.ts';
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
+import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -217,6 +218,32 @@ export function buildHttpRoutes(): Hono<Env> {
       });
       const res = listAgents({ req });
       return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Mints a short-lived signed ticket so the browser EventSource can auth
+  // the SSE stream (which can't send Authorization headers). See
+  // auth/stream-ticket.ts. The ticket is bound to (actor, project) and
+  // expires in 60s. Bearer-protected; the SSE endpoint itself is mounted
+  // outside this Hono router with its own ticket-auth.
+  api.post('/events/stream-ticket', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const projectId =
+        typeof body?.project_id === 'string' ? body.project_id : '';
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+        return c.json(
+          { error: 'validation_error', detail: 'project_id must be a uuid' },
+          400,
+        );
+      }
+      const actor = c.get('actor');
+      const out = issueStreamTicket(actor.id, projectId);
+      // Defense-in-depth: never let a CDN cache a ticket.
+      c.header('Cache-Control', 'no-store');
+      return c.json(out, 200);
     } catch (err) {
       return errorResponse(c, err);
     }
