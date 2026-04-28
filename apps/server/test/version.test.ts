@@ -10,10 +10,9 @@
  *  3) missing if_match: 400 (Zod validation).
  *  4) sequential retry: stale → re-fetch → retry with fresh version → 200.
  *
- *  The 4-actor concurrent race lives in events.test.ts (and is repeated
- *  in concurrency.test.ts in Stream 4C) — this file deliberately covers
- *  the *single-client* version semantics so a regression in either
- *  surface is caught independently.
+ *  The 4-actor concurrent race lives in events.test.ts — this file
+ *  deliberately covers the *single-client* version semantics so a
+ *  regression in either surface is caught independently.
  */
 
 import { v7 as uuidv7 } from 'uuid';
