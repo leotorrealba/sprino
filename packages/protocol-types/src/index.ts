@@ -175,4 +175,24 @@ export const TaskUpdateStatusResSchema = z.object({
 });
 export type TaskUpdateStatusRes = z.infer<typeof TaskUpdateStatusResSchema>;
 
+// Sprino-specific (not part of canonical Tessera protocol — Sprino extension
+// for the activity-feed UI). Server endpoint: GET /api/events.
+export const EventWithActorSchema = EventSchema.extend({
+  actor: z.object({
+    id: uuid,
+    display_name: z.string(),
+    kind: ActorKindSchema,
+  }),
+  task: z.object({
+    id: uuid,
+    title: z.string(),
+  }),
+});
+export type EventWithActor = z.infer<typeof EventWithActorSchema>;
+
+export const EventListResSchema = z.object({
+  events: z.array(EventWithActorSchema),
+});
+export type EventListRes = z.infer<typeof EventListResSchema>;
+
 export const PROTOCOL_VERSION = 'tessera/v0.0.2';

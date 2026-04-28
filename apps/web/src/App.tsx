@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
+import { ActivityFeed } from './components/ActivityFeed';
 
 type LoadState = 'idle' | 'loading' | 'error';
 
@@ -342,6 +343,8 @@ export function App() {
             ))}
           </ul>
         )}
+
+        <ActivityFeed token={token} projectId={selectedProjectId} />
       </main>
     </div>
   );
