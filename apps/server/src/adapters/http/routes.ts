@@ -42,6 +42,8 @@ import {
   VersionMismatchError,
   createTask,
   getTask,
+  listRelatedTasks,
+  listTaskEvents,
   listTasks,
   updateTaskStatus,
 } from '../../service/tasks.ts';
@@ -161,6 +163,36 @@ export function buildHttpRoutes(): Hono<Env> {
     }
   });
 
+  // Pagination companions to task.get's agent_context. When agent_context
+  // truncates (>32KB), the next_page_tokens point clients here for the tail.
+  api.get('/tasks/:id/events', async (c) => {
+    try {
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
+      const res = await listTaskEvents(c.get('db'), {
+        taskId: c.req.param('id'),
+        limit,
+        offset,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/tasks/:id/related_tasks', async (c) => {
+    try {
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
+      const res = await listRelatedTasks(c.get('db'), {
+        taskId: c.req.param('id'),
+        limit,
+        offset,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   // Sprino-specific activity feed endpoint — see service/events.ts.
   // Project-scoped event log with denormalized actor + task fields. Not
   // exposed via /mcp; agents read events through task.get's recent_events.
@@ -184,6 +216,22 @@ export function buildHttpRoutes(): Hono<Env> {
   });
 
   return api;
+}
+
+function parseLimitOffset(
+  q: (key: string) => string | undefined,
+): { limit: number | undefined; offset: number | undefined } {
+  const parseIntParam = (v: string | undefined): number | undefined => {
+    if (v === undefined || v === '') return undefined;
+    if (!/^-?\d+$/.test(v)) return undefined;
+    const n = Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return undefined;
+    return n;
+  };
+  return {
+    limit: parseIntParam(q('limit')),
+    offset: parseIntParam(q('offset')),
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -157,6 +157,9 @@ export const TaskUpdateStatusReqSchema = z.object({
   task_id: uuid,
   status: TaskStatusSchema,
   if_match: z.number().int().min(1),
+  // Free-form operator note captured into the status_changed event payload
+  // so the audit log preserves the rationale, not just the from→to delta.
+  notes: z.string().max(8192).optional(),
 });
 export type TaskUpdateStatusReq = z.infer<typeof TaskUpdateStatusReqSchema>;
 
