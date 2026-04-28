@@ -19,7 +19,7 @@
 import { v7 as uuidv7 } from 'uuid';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { createTask, updateTaskStatus } from '../src/service/tasks.ts';
+import { VersionMismatchError, createTask, updateTaskStatus } from '../src/service/tasks.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
@@ -193,11 +193,12 @@ describe('task.update_status: version + if_match (HTTP)', () => {
 });
 
 describe('task.update_status: version + if_match (service)', () => {
-  it('rejects an if_match=0 at validation time (Zod min(1))', async () => {
+  it('rejects an if_match=0 via the service version check', async () => {
     const { taskId } = await newTask();
-    // This call goes through the service directly. The schema is only
-    // applied at the HTTP boundary, so for service-level we sanity-check
-    // that calling with if_match=0 still rejects via the version check.
+    // This call goes through the service directly, not the HTTP/Zod
+    // boundary, so we assert that if_match=0 is rejected by the service's
+    // version mismatch check — and specifically by VersionMismatchError
+    // (not some unrelated failure like TaskNotFoundError or DB connectivity).
     await expect(
       updateTaskStatus(db, {
         req: {
@@ -208,6 +209,6 @@ describe('task.update_status: version + if_match (service)', () => {
         },
         actorId: FIXTURE_ACTOR_ID,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(VersionMismatchError);
   });
 });
