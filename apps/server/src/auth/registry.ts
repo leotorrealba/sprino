@@ -18,6 +18,7 @@ const ActorEntrySchema = z.object({
 export type ActorEntry = z.infer<typeof ActorEntrySchema>;
 
 let registry: Map<string, ActorEntry> | null = null;
+let registryById: Map<string, ActorEntry> | null = null;
 
 export function loadActorRegistry(): Map<string, ActorEntry> {
   if (registry) return registry;
@@ -29,16 +30,27 @@ export function loadActorRegistry(): Map<string, ActorEntry> {
   }
   const parsed = z.array(ActorEntrySchema).parse(JSON.parse(raw));
   const m = new Map<string, ActorEntry>();
+  const byId = new Map<string, ActorEntry>();
   for (const a of parsed) {
     if (m.has(a.token)) {
       throw new Error(`Duplicate token detected for actor ${a.id}`);
     }
+    if (byId.has(a.id)) {
+      throw new Error(`Duplicate actor id detected: ${a.id}`);
+    }
     m.set(a.token, a);
+    byId.set(a.id, a);
   }
   registry = m;
+  registryById = byId;
   return m;
 }
 
 export function lookupActorByToken(token: string): ActorEntry | undefined {
   return loadActorRegistry().get(token);
+}
+
+export function lookupActorById(id: string): ActorEntry | undefined {
+  if (!registryById) loadActorRegistry();
+  return registryById!.get(id);
 }

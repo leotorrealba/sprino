@@ -29,3 +29,7 @@ process.env.SPRINO_ACTORS_JSON = JSON.stringify([
     parent_actor_id: '018c3e7a-0001-7000-8000-000000000001',
   },
 ]);
+
+// SSE ticket signing secret — must be ≥32 chars per stream-ticket.ts.
+process.env.SPRINO_STREAM_SECRET =
+  'test-stream-secret-do-not-use-in-prod-32chars-min';
