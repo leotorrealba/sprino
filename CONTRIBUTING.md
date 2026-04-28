@@ -24,7 +24,7 @@ bun run dev
 Tests run against a real Postgres in CI (no mocks for Drizzle):
 
 ```bash
-bun test                  # full server test suite
+bun run test              # full server test suite
 bun run typecheck         # workspace-wide typecheck
 ```
 
