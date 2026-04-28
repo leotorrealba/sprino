@@ -1,0 +1,292 @@
+/**
+ * MCP-over-HTTP adapter — minimal JSON-RPC 2.0 dispatch on POST /mcp.
+ *
+ * Supports two methods:
+ *   - tools/list        → returns Tessera task/project tool definitions
+ *   - tools/call        → dispatches sprino.{task,project} tools
+ *
+ * Per the locked architecture (eng review): this is a thin adapter over
+ * service/tasks.ts. Same idempotency, same transactions, same error codes.
+ *
+ * v0.x scope:
+ *   - No SSE / streaming responses
+ *   - No session state
+ *   - No resources, prompts, or sampling
+ *
+ * If Claude Desktop / other clients need stdio MCP, write a shim at
+ * apps/server/scripts/mcp-stdio.ts that proxies to this endpoint.
+ */
+
+import { Hono } from 'hono';
+import { ZodError } from 'zod';
+import type { ActorEntry } from '../../auth/registry.ts';
+import type { Db } from '../../db/client.ts';
+import {
+  ProjectGetReqSchema,
+  TaskCreateReqSchema,
+  TaskGetReqSchema,
+  TaskUpdateStatusReqSchema,
+} from '../../domain/index.ts';
+import {
+  ProjectNotFoundError,
+  getProject,
+  listProjects,
+} from '../../service/projects.ts';
+import {
+  TaskNotFoundError,
+  VersionMismatchError,
+  createTask,
+  getTask,
+  updateTaskStatus,
+} from '../../service/tasks.ts';
+import {
+  IdempotencyConflictError,
+  OperationExpiredError,
+} from '../../service/idempotency.ts';
+
+type Env = { Variables: { actor: ActorEntry; db: Db } };
+
+interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: string | number;
+  method: string;
+  params?: unknown;
+}
+
+interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}
+
+const TOOL_DEFINITIONS = [
+  {
+    name: 'sprino.project.list',
+    description:
+      'List projects known to Sprino. Use this before task.create when no repo context is available.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: 'sprino.project.get',
+    description:
+      'Fetch a project by project_id, slug, or repo_path. Repo paths are used for week 2 multi-repo auto-detection.',
+    inputSchema: {
+      type: 'object',
+      anyOf: [
+        { required: ['project_id'] },
+        { required: ['slug'] },
+        { required: ['repo_path'] },
+      ],
+      properties: {
+        project_id: { type: 'string', format: 'uuid' },
+        slug: { type: 'string', minLength: 1, maxLength: 64 },
+        repo_path: { type: 'string', minLength: 1 },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.create',
+    description:
+      'Create a task in a project. Idempotent via operation_id (UUIDv7). project_id may be inferred from repo_path by the stdio shim.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'title'],
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        project_id: { type: 'string', format: 'uuid' },
+        repo_path: { type: 'string', minLength: 1 },
+        title: { type: 'string', minLength: 1, maxLength: 280 },
+        description: { type: 'string', maxLength: 16384 },
+        assignee_id: { type: ['string', 'null'], format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.get',
+    description:
+      'Fetch a task with its agent_context (recent_events, related_tasks, repo_refs).',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      properties: { task_id: { type: 'string', format: 'uuid' } },
+    },
+  },
+  {
+    name: 'sprino.task.update_status',
+    description:
+      "Mutate a task's status. Idempotent via operation_id; concurrency-safe via if_match.",
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'status', 'if_match'],
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        status: { enum: ['todo', 'doing', 'done', 'blocked'] },
+        if_match: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
+];
+
+export function buildMcpRoutes(): Hono<Env> {
+  const mcp = new Hono<Env>();
+
+  mcp.post('/', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        rpcError(null, -32700, 'Parse error: invalid JSON'),
+        400,
+      );
+    }
+
+    const rpc = body as JsonRpcRequest;
+    if (rpc?.jsonrpc !== '2.0' || typeof rpc.method !== 'string') {
+      return c.json(rpcError(rpc?.id ?? null, -32600, 'Invalid Request'), 400);
+    }
+
+    const id = rpc.id ?? null;
+    try {
+      const result = await dispatch(c, rpc);
+      return c.json({ jsonrpc: '2.0', id, result } satisfies JsonRpcResponse);
+    } catch (err) {
+      return c.json(translateError(id, err));
+    }
+  });
+
+  return mcp;
+}
+
+async function dispatch(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: any,
+  rpc: JsonRpcRequest,
+): Promise<unknown> {
+  if (rpc.method === 'tools/list') {
+    return { tools: TOOL_DEFINITIONS };
+  }
+
+  if (rpc.method === 'tools/call') {
+    const params = rpc.params as
+      | { name?: string; arguments?: unknown }
+      | undefined;
+    const name = params?.name;
+    const args = params?.arguments;
+    if (typeof name !== 'string') {
+      throw new RpcMethodError(-32602, 'Invalid params: name required');
+    }
+    return await callTool(c, name, args);
+  }
+
+  throw new RpcMethodError(-32601, `Method not found: ${rpc.method}`);
+}
+
+async function callTool(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  c: any,
+  name: string,
+  args: unknown,
+): Promise<unknown> {
+  const db: Db = c.get('db');
+  const actor: ActorEntry = c.get('actor');
+
+  switch (name) {
+    case 'sprino.project.list': {
+      const res = await listProjects(db);
+      return wrapToolResult(res);
+    }
+    case 'sprino.project.get': {
+      const req = ProjectGetReqSchema.parse(args ?? {});
+      const res = await getProject(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.create': {
+      const req = TaskCreateReqSchema.parse(args);
+      const res = await createTask(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.get': {
+      const req = TaskGetReqSchema.parse(args);
+      const res = await getTask(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.update_status': {
+      const req = TaskUpdateStatusReqSchema.parse(args);
+      const res = await updateTaskStatus(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    default:
+      throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
+  }
+}
+
+/**
+ * MCP tool result envelope: { content: [{ type: 'text', text: '...' }] }.
+ * We also include `structuredContent` (newer MCP feature) so MCP clients
+ * that prefer typed objects don't have to parse the text blob.
+ */
+function wrapToolResult(payload: unknown): unknown {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    structuredContent: payload,
+  };
+}
+
+class RpcMethodError extends Error {
+  constructor(public readonly code: number, message: string) {
+    super(message);
+  }
+}
+
+function rpcError(
+  id: string | number | null,
+  code: number,
+  message: string,
+  data?: unknown,
+): JsonRpcResponse {
+  return {
+    jsonrpc: '2.0',
+    id,
+    error: { code, message, ...(data !== undefined ? { data } : {}) },
+  };
+}
+
+function translateError(
+  id: string | number | null,
+  err: unknown,
+): JsonRpcResponse {
+  if (err instanceof ZodError) {
+    return rpcError(id, -32602, 'Invalid params', err.issues);
+  }
+  if (err instanceof RpcMethodError) {
+    return rpcError(id, err.code, err.message);
+  }
+  if (err instanceof ProjectNotFoundError) {
+    return rpcError(id, -32004, 'project_not_found', { ref: err.ref });
+  }
+  if (err instanceof TaskNotFoundError) {
+    return rpcError(id, -32004, 'task_not_found', { task_id: err.taskId });
+  }
+  if (err instanceof VersionMismatchError) {
+    return rpcError(id, -32009, 'version_mismatch', {
+      task: err.currentTask,
+    });
+  }
+  if (err instanceof IdempotencyConflictError) {
+    return rpcError(id, -32010, 'operation_id_conflict', {
+      cached_response: err.cachedResponse,
+    });
+  }
+  if (err instanceof OperationExpiredError) {
+    return rpcError(id, -32011, 'operation_expired');
+  }
+  console.error('Unhandled MCP error:', err);
+  return rpcError(id, -32603, 'Internal error');
+}

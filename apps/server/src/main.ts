@@ -1,0 +1,93 @@
+/**
+ * Sprino server entry point.
+ *
+ * Single Hono process, two adapters mounted:
+ *   /api/*    — REST adapter for the web UI
+ *   /mcp      — JSON-RPC 2.0 adapter for MCP-over-HTTP
+ *
+ * Both adapters share:
+ *   - the same Postgres pool (db/client.ts)
+ *   - the same per-actor token middleware (auth/middleware.ts)
+ *   - the same service/* business logic (eng review, locked)
+ *
+ * Run:
+ *   bun --filter '@sprino/server' dev
+ */
+
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+import type { ActorEntry } from './auth/registry.ts';
+import { loadActorRegistry } from './auth/registry.ts';
+import { tokenAuth } from './auth/middleware.ts';
+import { db, closeDb } from './db/client.ts';
+import type { Db } from './db/client.ts';
+import { buildHttpRoutes } from './adapters/http/routes.ts';
+import { buildMcpRoutes } from './adapters/mcp/server.ts';
+
+type Env = {
+  Variables: { actor: ActorEntry; db: Db };
+};
+
+function buildApp(): Hono<Env> {
+  // Fail fast if SPRINO_ACTORS_JSON is missing or malformed.
+  loadActorRegistry();
+
+  const app = new Hono<Env>();
+
+  app.use('*', async (c, next) => {
+    c.set('db', db);
+    await next();
+  });
+
+  app.get('/healthz', (c) =>
+    c.json({ ok: true, version: '0.0.2', protocol: 'tessera/v0.0.2' }),
+  );
+
+  // /api/* — REST. Auth required.
+  const api = new Hono<Env>();
+  api.use('*', tokenAuth);
+  api.route('/', buildHttpRoutes());
+  app.route('/api', api);
+
+  // /mcp — JSON-RPC 2.0 over HTTP. Auth required.
+  // Tokens come from MCP server config (NEVER tool inputs — see SECURITY note
+  // in design doc §Secrets & Auth).
+  const mcp = new Hono<Env>();
+  mcp.use('*', tokenAuth);
+  mcp.route('/', buildMcpRoutes());
+  app.route('/mcp', mcp);
+
+  app.notFound((c) => c.json({ error: 'not_found' }, 404));
+
+  return app;
+}
+
+async function main(): Promise<void> {
+  const port = Number(process.env.PORT ?? 3001);
+  const app = buildApp();
+
+  const server = serve({ fetch: app.fetch, port }, (info) => {
+    console.log(`Sprino server listening on http://localhost:${info.port}`);
+    console.log(`  /api/*  — REST  (Bearer token required)`);
+    console.log(`  /mcp    — JSON-RPC 2.0 (Bearer token required)`);
+  });
+
+  const shutdown = async (signal: string): Promise<void> => {
+    console.log(`\nReceived ${signal}, shutting down...`);
+    server.close();
+    await closeDb();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}
+
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal error during server boot:', err);
+    process.exit(1);
+  });
+}
+
+export { buildApp };
