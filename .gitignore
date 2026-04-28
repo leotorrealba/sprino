@@ -53,3 +53,4 @@ postgres-data/
 *.seed
 *.pid.lock
 backups/
+PHASES3-8-TASKS.md
