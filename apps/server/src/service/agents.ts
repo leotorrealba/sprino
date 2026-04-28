@@ -8,7 +8,7 @@
  * agents appear here. Tokens are NEVER returned.
  */
 
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { actors } from '../db/schema.ts';
 import {
@@ -28,8 +28,8 @@ export async function listAgents(
   const rows = await db
     .select()
     .from(actors)
-    .where(eq(actors.kind, 'agent'));
-  rows.sort((a, b) => a.id.localeCompare(b.id));
+    .where(eq(actors.kind, 'agent'))
+    .orderBy(asc(actors.id));
 
   const all: Agent[] = rows.map((r) => ({
     id: r.id,
