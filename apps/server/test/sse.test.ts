@@ -71,8 +71,16 @@ describe('Phase 6C — stream-ticket signing (unit)', () => {
 
   it('rejects tampered signature', () => {
     const { ticket } = issueStreamTicket(FIXTURE_ACTOR_ID, FIXTURE_PROJECT_ID);
-    // Flip a single character in the signature half.
-    const tampered = ticket.slice(0, -1) + (ticket.endsWith('A') ? 'B' : 'A');
+    // Flip the FIRST character of the signature segment (not the last). The
+    // base64url encoding of a 32-byte HMAC is 43 chars, and the final char
+    // only encodes 4 bits — its low 2 bits are unused padding, so flipping
+    // 'A'→'B' there can decode to the same bytes and produce a flaky test.
+    // The first signature char uses all 6 bits, guaranteeing a byte change.
+    const lastDot = ticket.lastIndexOf('.');
+    const sigStart = lastDot + 1;
+    const firstSigChar = ticket[sigStart] ?? '';
+    const flipped = firstSigChar === 'A' ? 'B' : 'A';
+    const tampered = ticket.slice(0, sigStart) + flipped + ticket.slice(sigStart + 1);
     expect(() => verifyStreamTicket(tampered, FIXTURE_PROJECT_ID)).toThrow(
       StreamTicketError,
     );

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Sprino are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — though everything below `1.0.0` is pre-release and breaking changes are allowed between minor tags.
+All notable changes to Sprino are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — though everything below `1.0.0` is pre-release and breaking changes may occur in any pre-`1.0.0` release, including patch tags (`v0.0.x`).
 
 Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire protocol is versioned independently in that repo.
 
@@ -42,30 +42,30 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Tessera v0.1.1 conformance suite replay. `apps/server/test/conformance.test.ts` reads each fixture from `../tessera/conformance/*.json` and replays it through the live HTTP routes against a real Postgres. Any drift from the spec fails CI.
 - Spec-lock: bump Tessera version requires bumping `@sprino/protocol-types` and re-running conformance.
 
-## [v0.0.4] — 2026-04-26 (Phase 4 — Hardening)
+## v0.0.4 — 2026-04-26 (Phase 4 — Hardening; rolled into the v0.0.5 tag)
 
 ### Added
 - **4A — Agent context.** Per-agent scratch space (`agent_context`) with a 32KB cap and pagination endpoints. Append-only, no overwrites; the agent can summarize-and-trim itself.
 - **4B — Optimistic concurrency.** `task.update_status` requires `if_match` (the task's current version). Mismatched versions return `409 conflict`. Version is bumped inside the same transaction as the event write.
 - **4C — Concurrency stress test.** 100 concurrent `update_status` calls against the same task. Exactly one wins; the other 99 get `409`. Test asserts wall-clock runtime stays under the budget on a monotonic clock.
 
-## [v0.0.3] — 2026-04-26 (Phase 3 — Auth + activity feed)
+## v0.0.3 — 2026-04-26 (Phase 3 — Auth + activity feed; rolled into the v0.0.5 tag)
 
 ### Added
 - **3A — Bearer-token auth.** Multi-actor registry seeded from `SPRINO_ACTORS_JSON`. Each actor has a `kind` (`human` | `agent`), an opaque token, and (for agents) a runtime tag and parent actor. Middleware returns `401 missing_or_malformed_authorization` for missing/malformed `Authorization` headers and `403 invalid_token` for valid-shape-but-unknown Bearer tokens.
 - **3B — Events list endpoint.** `GET /api/events` returns the append-only event log, scoped to the project. Powers the activity feed.
 - **3C — Activity feed UI.** Web app polls `/api/events` every 10 seconds and renders one row per event with the originating actor's display name and a relative timestamp.
 
-## [v0.0.2] — 2026-04-26 (early protocol-types)
+## v0.0.2 — 2026-04-26 (early protocol-types; rolled into the v0.0.5 tag)
 
 ### Added
 - `@sprino/protocol-types` — TypeScript types generated from Tessera v0.0.2 JSON Schemas.
 - First end-to-end task creation path (`task.create`) wired through HTTP, MCP, and the projection.
 
-## [v0.0.1] — 2026-04-26
+## v0.0.1 — 2026-04-26 (rolled into the v0.0.5 tag)
 
 ### Added
-- Bootstrapped Sprino v0.0.0 as the reference implementation of Tessera.
+- Bootstrapped Sprino as the reference implementation of Tessera.
 - Workspace skeleton: `apps/server` (Hono + Drizzle + Postgres), `apps/web` (Vite + React + shadcn), `packages/protocol-types`.
 - PR CI workflow: `pr-title` (conventional commits), `ts-typecheck`, `ts-test`.
 
@@ -85,3 +85,8 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - **Web UI is intentionally thin.** No drag-and-drop, no inline editing, no comments. The protocol layer is where correctness lives; the UI is a viewer for now.
 - **No hosted SaaS.** Self-host only. Cloud is on the roadmap, not on the calendar.
 - **macOS / Linux only.** `bootstrap.sh` is bash; Windows users need WSL.
+
+[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.0.7...HEAD
+[v0.0.7]: https://github.com/leotorrealba/sprino/compare/v0.0.6...v0.0.7
+[v0.0.6]: https://github.com/leotorrealba/sprino/compare/v0.0.5...v0.0.6
+[v0.0.5]: https://github.com/leotorrealba/sprino/compare/v0.0.0...v0.0.5
