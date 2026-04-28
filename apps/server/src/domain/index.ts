@@ -80,18 +80,21 @@ export const EventSchema = z.object({
 });
 export type Event = z.infer<typeof EventSchema>;
 
-// Event with denormalized actor + task fields for the activity feed.
-// The activity feed renders "Leo (human) marked Task 'fix bug' as done"
-// — having display_name and task title inline avoids N+1 lookups in the UI.
+// Sprino-specific activity-feed types. Not part of canonical Tessera; the
+// protocol exposes events through `task.get`'s `recent_events`.
+//
+// EventWithActor reuses `ActorSchema` / `TaskSchema` field constraints via
+// `.pick(...)` so this response shape stays in lockstep with the canonical
+// resource shapes — no drift in min/max bounds.
 export const EventWithActorSchema = EventSchema.extend({
-  actor: z.object({
-    id: uuid,
-    display_name: z.string(),
-    kind: z.enum(['human', 'agent']),
+  actor: ActorSchema.pick({
+    id: true,
+    display_name: true,
+    kind: true,
   }),
-  task: z.object({
-    id: uuid,
-    title: z.string(),
+  task: TaskSchema.pick({
+    id: true,
+    title: true,
   }),
 });
 export type EventWithActor = z.infer<typeof EventWithActorSchema>;
@@ -160,8 +163,11 @@ export type TaskUpdateStatusReq = z.infer<typeof TaskUpdateStatusReqSchema>;
 export const EventListReqSchema = z.object({
   project_id: uuid,
   task_id: uuid.optional(),
-  limit: z.number().int().min(1).max(200).optional(),
-  offset: z.number().int().min(0).optional(),
+  // `z.coerce.number()` accepts strings from the HTTP query layer and
+  // rejects malformed values (`abc`, empty, etc.) with a validation error
+  // rather than silently dropping them.
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 });
 export type EventListReq = z.infer<typeof EventListReqSchema>;
 

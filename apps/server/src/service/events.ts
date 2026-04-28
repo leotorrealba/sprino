@@ -25,13 +25,14 @@ import type {
 } from '../domain/index.ts';
 
 const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
 
 export async function listEvents(
   db: Db,
   args: { req: EventListReq },
 ): Promise<EventListRes> {
-  const limit = Math.min(args.req.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+  // The upper bound (200) is enforced by EventListReqSchema. We only apply
+  // a default here when the caller didn't supply one.
+  const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
 
   const whereClause = args.req.task_id
