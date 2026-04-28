@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 import readline from 'readline';
 import { detectProjectContext } from './project-context.ts';
 

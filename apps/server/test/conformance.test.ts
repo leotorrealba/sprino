@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * Tessera v0.0.2 conformance: runs the canonical request/response fixtures
  * from `../tessera/conformance/fixtures/` against the actual server.

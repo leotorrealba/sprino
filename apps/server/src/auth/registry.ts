@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * In-memory actor registry loaded from SPRINO_ACTORS_JSON.
  *

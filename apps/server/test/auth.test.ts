@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * Stream 3A: unit tests for the actor registry + Bearer-token middleware.
  *

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
 /**
  * Projects service — implements the Tessera v0.0.2 project read surface.
  *
