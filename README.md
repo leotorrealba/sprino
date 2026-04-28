@@ -35,6 +35,10 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.0** — repo scaffold (this commit)
 - **v0.0.1** (phase 1) — "Hello Task" slice: protocol fixtures, Postgres schema, Hono backend, MCP routes, single-page frontend, dogfood loop closed
 - **v0.0.2** (phase 2) — project scoping + multi-repo: project list/get, repo-aware MCP task creation, frontend project switcher
+- **v0.0.3** (phase 3) — task lifecycle + agent presence, single-tenant auth, Tessera v0.1 conformance suite v1
+- **v0.0.4** (phase 4) — server-side `task.update`, optimistic locking, error envelope, Codex challenge skill, hardened CI
+- **v0.0.5** (phase 5) — Tessera v0.1.0 stabilization, conformance fixtures locked, deprecation policy, semver guarantees
+- **v0.0.6** (phase 6) — buffer + hardening: pagination contract on `events.list` / `tasks.list` / `agents.list`, SSE realtime fallback, nightly `pg_dump` backup sidecar with `docs/RESTORE.md` playbook
 - **v0.0.x** — vertical slices, one per phase, through phase 8
 - **v0.1.0** (phase 8) — first public release, self-host walkthrough, Tessera v0.1 milestone
 
