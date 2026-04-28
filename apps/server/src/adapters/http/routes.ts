@@ -1,15 +1,20 @@
 /**
- * HTTP adapter — thin routes calling service/tasks.ts.
+ * HTTP adapter — thin routes calling the service/ layer.
  *
- *   POST   /api/tasks              → createTask
- *   GET    /api/tasks/:id          → getTask
- *   PATCH  /api/tasks/:id/status   → updateTaskStatus
+ *   POST   /api/tasks                → createTask
+ *   GET    /api/tasks/:id            → getTask
+ *   PATCH  /api/tasks/:id/status     → updateTaskStatus
+ *   GET    /api/projects             → listProjects
+ *   GET    /api/projects/resolve     → resolveProject (by slug or repo_path)
+ *   GET    /api/projects/:id         → getProject
+ *   GET    /api/events               → listEvents (Sprino activity feed)
  *
  * No business logic in this file. Translation only:
- *   - parse request body via Zod
+ *   - parse request body / query via Zod
  *   - call service layer
  *   - map domain errors to HTTP status codes:
  *       TaskNotFoundError       → 404
+ *       ProjectNotFoundError    → 404
  *       VersionMismatchError    → 409 with current task body
  *       IdempotencyConflictError → 409 with cached response body
  *       OperationExpiredError   → 410
@@ -20,6 +25,7 @@ import { Hono } from 'hono';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import {
+  EventListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
@@ -30,6 +36,7 @@ import {
   getProject,
   listProjects,
 } from '../../service/projects.ts';
+import { listEvents } from '../../service/events.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -148,6 +155,28 @@ export function buildHttpRoutes(): Hono<Env> {
         req,
         actorId: actor.id,
       });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific activity feed endpoint — see service/events.ts.
+  // Project-scoped event log with denormalized actor + task fields. Not
+  // exposed via /mcp; agents read events through task.get's recent_events.
+  api.get('/events', async (c) => {
+    try {
+      // Pass raw query strings into the schema. Zod's `z.coerce.number()`
+      // (configured in EventListReqSchema) rejects malformed values like
+      // `?limit=abc` or `?limit=` with a 400, instead of silently treating
+      // them as "absent".
+      const req = EventListReqSchema.parse({
+        project_id: c.req.query('project_id'),
+        task_id: c.req.query('task_id'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = await listEvents(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);

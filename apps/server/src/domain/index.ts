@@ -80,6 +80,25 @@ export const EventSchema = z.object({
 });
 export type Event = z.infer<typeof EventSchema>;
 
+// Sprino-specific activity-feed types. Not part of canonical Tessera; the
+// protocol exposes events through `task.get`'s `recent_events`.
+//
+// EventWithActor reuses `ActorSchema` / `TaskSchema` field constraints via
+// `.pick(...)` so this response shape stays in lockstep with the canonical
+// resource shapes — no drift in min/max bounds.
+export const EventWithActorSchema = EventSchema.extend({
+  actor: ActorSchema.pick({
+    id: true,
+    display_name: true,
+    kind: true,
+  }),
+  task: TaskSchema.pick({
+    id: true,
+    title: true,
+  }),
+});
+export type EventWithActor = z.infer<typeof EventWithActorSchema>;
+
 export const RepoRefSchema = z.object({
   kind: z.enum(['commit', 'branch', 'pr', 'file', 'issue']),
   ref: z.string(),
@@ -141,6 +160,17 @@ export const TaskUpdateStatusReqSchema = z.object({
 });
 export type TaskUpdateStatusReq = z.infer<typeof TaskUpdateStatusReqSchema>;
 
+export const EventListReqSchema = z.object({
+  project_id: uuid,
+  task_id: uuid.optional(),
+  // `z.coerce.number()` accepts strings from the HTTP query layer and
+  // rejects malformed values (`abc`, empty, etc.) with a validation error
+  // rather than silently dropping them.
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+export type EventListReq = z.infer<typeof EventListReqSchema>;
+
 // ────────────────────────────────────────────────────────────────────────
 // Verbs — response shapes
 // ────────────────────────────────────────────────────────────────────────
@@ -173,3 +203,8 @@ export const TaskUpdateStatusResSchema = z.object({
   event: EventSchema,
 });
 export type TaskUpdateStatusRes = z.infer<typeof TaskUpdateStatusResSchema>;
+
+export const EventListResSchema = z.object({
+  events: z.array(EventWithActorSchema),
+});
+export type EventListRes = z.infer<typeof EventListResSchema>;
