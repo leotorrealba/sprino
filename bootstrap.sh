@@ -126,10 +126,10 @@ done
 # the looser SAFE_NAME_RE through here, bootstrap.sh would happily seed
 # a project whose slug then 422s on every /api/projects/resolve?slug=...
 # call. Keep these two regexes in sync with the server.
-SAFE_SLUG_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+SAFE_SLUG_RE='^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'
 if ! printf '%s' "$PROJECT_SLUG" | grep -Eq "$SAFE_SLUG_RE"; then
-    echo "bootstrap.sh: PROJECT_SLUG must be lowercase alphanumerics and" >&2
-    echo "  hyphens only (no leading/trailing hyphen)." >&2
+    echo "bootstrap.sh: PROJECT_SLUG must be 1-64 characters of lowercase" >&2
+    echo "  alphanumerics and hyphens only (no leading/trailing hyphen)." >&2
     echo "  This matches the server's projectSlug schema." >&2
     echo "  Got: $PROJECT_SLUG" >&2
     exit 1
