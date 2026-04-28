@@ -95,7 +95,7 @@ through different transports.
 | Layer | Choice | Why |
 | --- | --- | --- |
 | Language | TypeScript 5.9 | Shared types between server, web, and protocol-types. |
-| Runtime | Bun 1.3 | Fast install + native test runner. Node-compatible at runtime. |
+| Runtime | Bun 1.3 | Fast installs and script execution. Tests run via Vitest (`bun run test`), not Bun's built-in test runner. |
 | HTTP | Hono | Edge-ready, tiny, middleware-friendly. Same process for HTTP + MCP. |
 | ORM | Drizzle | Typed SQL, no runtime overhead, schema-as-code. |
 | DB | Postgres 16 | Event log + JSON columns + LISTEN/NOTIFY (deferred to v0.2). |
@@ -191,8 +191,10 @@ its caller arrived via HTTP or MCP.
   event log's actor reference.
 - For SSE, browsers can't set custom headers on `EventSource`, so we issue
   short-lived **stream tickets** signed with HMAC-SHA256 over
-  `${actorId}.${projectId}.${exp}`. Clients exchange a Bearer token for a
-  ticket, then connect with `?ticket=<base64url>`.
+  `${actorId}.${projectId}.${exp}`. The issued ticket is the dotted string
+  `<actor_id>.<project_id>.<exp_ms>.<base64url(signature)>`. Clients
+  exchange a Bearer token for a ticket, then pass that full string as the
+  `ticket` query param.
 
 ### Realtime
 
@@ -226,7 +228,7 @@ name + token, create a task. The `full` profile includes a nightly
 ### Backup & restore
 
 - The `backup` service runs `pg_dump` on a cron and writes to a mounted
-  volume. Retention is configurable via `BACKUP_KEEP_DAYS`.
+  volume. Retention is configurable via `BACKUP_RETENTION` (default 30).
 - Restore playbook: [`docs/RESTORE.md`](./RESTORE.md).
 - The restore script (`scripts/backup.test.sh`) is exercised in CI.
 
@@ -242,7 +244,9 @@ name + token, create a task. The `full` profile includes a nightly
 - `events.list` — limit ≤ 1000.
 - `tasks.list` — limit ≤ 500.
 - `agents.list` — limit ≤ 100.
-- All return `next_cursor` for keyset pagination. The contract is locked
+- All list endpoints take `limit` + `offset` (validated by the server's
+  pagination schema in `domain/pagination.ts`) and return a
+  `next_page_token` that encodes the next offset. The contract is locked
   for v0.1 in Tessera and tested in `pagination.test.ts`.
 
 ---
