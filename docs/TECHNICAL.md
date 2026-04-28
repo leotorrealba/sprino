@@ -186,9 +186,11 @@ its caller arrived via HTTP or MCP.
 - HTTP and MCP both require `Authorization: Bearer <token>`.
 - Tokens are loaded from the `SPRINO_ACTORS_JSON` env var at startup
   (`auth/registry.ts`). Each token maps to an actor (human or agent).
-- The middleware attaches the resolved `actor` to the request context.
-  Service functions read it from there for `created_by` fields and the
-  event log's actor reference.
+- The middleware attaches the resolved `actor` to the Hono request
+  context for the HTTP/MCP adapters. Those adapters then pass `actorId`
+  explicitly into `service/*` functions for `created_by` fields and the
+  event log's actor reference; the service layer is transport-agnostic
+  and does not depend on Hono context.
 - For SSE, browsers can't set custom headers on `EventSource`, so we issue
   short-lived **stream tickets** signed with HMAC-SHA256 over
   `${actorId}.${projectId}.${exp}`. The issued ticket is the dotted string
@@ -230,7 +232,10 @@ name + token, create a task. The `full` profile includes a nightly
 - The `backup` service runs `pg_dump` on a cron and writes to a mounted
   volume. Retention is configurable via `BACKUP_RETENTION` (default 30).
 - Restore playbook: [`docs/RESTORE.md`](./RESTORE.md).
-- The restore script (`scripts/backup.test.sh`) is exercised in CI.
+- The backup/restore integration test lives at `scripts/backup.test.sh`
+  and can be run explicitly with `bun run test:backup`. It is not part
+  of the default CI workflow — operators should run it as part of a
+  release checklist or pre-deploy verification.
 
 ### Token rotation
 
@@ -244,10 +249,17 @@ name + token, create a task. The `full` profile includes a nightly
 - `events.list` — limit ≤ 1000.
 - `tasks.list` — limit ≤ 500.
 - `agents.list` — limit ≤ 100.
-- All list endpoints take `limit` + `offset` (validated by the server's
-  pagination schema in `domain/pagination.ts`) and return a
-  `next_page_token` that encodes the next offset. The contract is locked
-  for v0.1 in Tessera and tested in `pagination.test.ts`.
+- List endpoints take `limit` + `offset` (validated by the server's
+  pagination schema in `domain/pagination.ts`). The implemented list
+  responses (`EventListResSchema`, `TaskListResSchema`,
+  `AgentListResSchema`) return arrays only — no `next_page_token`.
+- `next_page_token`(s) are reserved for **agent-context truncation**:
+  `task.get` returns a map of `agent_context.next_page_tokens` when the
+  embedded context is truncated to keep the response under 32 KB, and
+  the dedicated tail endpoints (`/tasks/:id/events` and
+  `/tasks/:id/related_tasks`) accept that token to fetch the rest.
+- The contract is locked for v0.1 in Tessera and tested in
+  `pagination.test.ts`.
 
 ---
 
@@ -260,7 +272,8 @@ The test discipline is documented in [CLAUDE.md](../CLAUDE.md). Summary:
   `*.res.json` pair from the sibling `tessera/conformance/fixtures/`
   directory against a live server.
 - **Integration tests** for `service/*` and adapters use a real Postgres
-  (Testcontainers in CI; locally a Docker Compose `postgres` service on
+  (in CI, a GitHub Actions `services.postgres` container reached via
+  `TEST_DATABASE_URL`; locally, a Docker Compose `postgres` service on
   port 5433). No mocks of Drizzle, no in-memory shims.
 - **Unit tests sparingly.** Reserved for pure functions: idempotency hash,
   event-log replay, base64url encoding.
