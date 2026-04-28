@@ -32,7 +32,7 @@
  *   ActorValidationError        → 400 validation_error (with field/reason)
  */
 
-import { and, count, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
@@ -252,11 +252,16 @@ export async function listActors(
   db: Db,
   args: { req: ActorListReq },
 ): Promise<{ actors: Actor[] }> {
+  // Order pushed into SQL so we don't fetch-and-sort the whole table in
+  // memory once it grows. Stable order keeps test fixtures and the
+  // Members UI consistent across calls.
   const rows = await (args.req.kind
-    ? db.select().from(actors).where(eq(actors.kind, args.req.kind))
-    : db.select().from(actors));
-  // Stable order so test fixtures and Members UI match across calls.
-  rows.sort((a, b) => a.id.localeCompare(b.id));
+    ? db
+        .select()
+        .from(actors)
+        .where(eq(actors.kind, args.req.kind))
+        .orderBy(asc(actors.id))
+    : db.select().from(actors).orderBy(asc(actors.id)));
   return { actors: rows.map(rowToActor) };
 }
 
