@@ -45,8 +45,10 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 
 ## Self-host (30 minutes, end-to-end)
 
-You need: Docker (with Compose v2), ~2 GB free RAM, ~5 GB free disk.
-That's it. No Postgres install, no Node/Bun, no nginx config.
+You need: Docker (with Compose v2), `git`, `openssl`, ~2 GB free RAM,
+~5 GB free disk. `git` and `openssl` are present on virtually every
+developer machine; the only thing most people need to install is
+Docker. No Postgres install, no Node/Bun, no nginx config.
 
 ```sh
 git clone https://github.com/leotorrealba/sprino.git

@@ -101,14 +101,14 @@ ADMIN_NAME=${ADMIN_NAME:-Admin}
 PROJECT_SLUG=${PROJECT_SLUG:-sprino}
 PROJECT_NAME=${PROJECT_NAME:-Sprino}
 
-# Validate that names use only characters that are safe to embed in a
-# single-quoted dotenv value (no apostrophes, no shell metas, no newlines)
-# and in a JSON string without escaping (no double quotes, no backslashes).
-# This sidesteps the entire quoting-edge-case minefield: if your admin
-# really is named O'Connor, edit .env by hand or set ADMIN_NAME after
-# manual escaping.
+# Validate display names (ADMIN_NAME, PROJECT_NAME) use only characters
+# that are safe to embed in a single-quoted dotenv value (no apostrophes,
+# no shell metas, no newlines) and in a JSON string without escaping
+# (no double quotes, no backslashes). This sidesteps the entire
+# quoting-edge-case minefield: if your admin really is named O'Connor,
+# edit .env by hand or set ADMIN_NAME after manual escaping.
 SAFE_NAME_RE='^[A-Za-z0-9 ._-]+$'
-for pair in "ADMIN_NAME=$ADMIN_NAME" "PROJECT_NAME=$PROJECT_NAME" "PROJECT_SLUG=$PROJECT_SLUG"; do
+for pair in "ADMIN_NAME=$ADMIN_NAME" "PROJECT_NAME=$PROJECT_NAME"; do
     name=${pair%%=*}
     val=${pair#*=}
     if ! printf '%s' "$val" | grep -Eq "$SAFE_NAME_RE"; then
@@ -119,6 +119,21 @@ for pair in "ADMIN_NAME=$ADMIN_NAME" "PROJECT_NAME=$PROJECT_NAME" "PROJECT_SLUG=
         exit 1
     fi
 done
+
+# PROJECT_SLUG has a stricter shape: it must match the server's domain
+# schema (apps/server/src/domain/index.ts → projectSlug regex), which
+# only allows lowercase alphanumerics and internal hyphens. If we let
+# the looser SAFE_NAME_RE through here, bootstrap.sh would happily seed
+# a project whose slug then 422s on every /api/projects/resolve?slug=...
+# call. Keep these two regexes in sync with the server.
+SAFE_SLUG_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+if ! printf '%s' "$PROJECT_SLUG" | grep -Eq "$SAFE_SLUG_RE"; then
+    echo "bootstrap.sh: PROJECT_SLUG must be lowercase alphanumerics and" >&2
+    echo "  hyphens only (no leading/trailing hyphen)." >&2
+    echo "  This matches the server's projectSlug schema." >&2
+    echo "  Got: $PROJECT_SLUG" >&2
+    exit 1
+fi
 
 ADMIN_ACTOR_ID=$(gen_uuid)
 ADMIN_TOKEN=$(gen_token)
