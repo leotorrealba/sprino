@@ -249,3 +249,80 @@ export const AgentListResSchema = z.object({
   agents: z.array(AgentSchema),
 });
 export type AgentListRes = z.infer<typeof AgentListResSchema>;
+
+// ────────────────────────────────────────────────────────────────────────
+// Append-only — Tessera v0.1.2 actor lifecycle.
+// ────────────────────────────────────────────────────────────────────────
+
+const ActorRegisterReqShape = z.object({
+  // Use distinct error messages so ZodError → ActorValidationError mapping
+  // (in service/actors.ts) renders the exact strings the conformance
+  // fixtures assert on.
+  operation_id: uuid,
+  display_name: z
+    .string({
+      required_error: 'Required field is missing.',
+      invalid_type_error: 'Must be a string.',
+    })
+    .min(1, { message: 'Required field is missing.' })
+    .max(200),
+  kind: z
+    .string({
+      required_error: 'Required field is missing.',
+    })
+    .refine((v) => v === 'human', {
+      message: 'Only `human` is accepted in v0.1.2.',
+    }),
+});
+
+export const ActorRegisterReqSchema = ActorRegisterReqShape.strict().transform(
+  (v) => ({
+    operation_id: v.operation_id,
+    display_name: v.display_name,
+    kind: v.kind as 'human',
+  }),
+);
+export type ActorRegisterReq = {
+  operation_id: string;
+  display_name: string;
+  kind: 'human';
+};
+
+export const ActorListReqSchema = z
+  .object({
+    kind: z.enum(['human', 'agent']).optional(),
+  })
+  .strict();
+export type ActorListReq = z.infer<typeof ActorListReqSchema>;
+
+export const ActorGetReqSchema = z
+  .object({
+    actor_id: uuid,
+  })
+  .strict();
+export type ActorGetReq = z.infer<typeof ActorGetReqSchema>;
+
+export const ActorRevokeTokenReqSchema = z
+  .object({
+    operation_id: uuid,
+    actor_id: uuid,
+  })
+  .strict();
+export type ActorRevokeTokenReq = z.infer<typeof ActorRevokeTokenReqSchema>;
+
+export const ActorRegisterResSchema = z.object({
+  actor: ActorSchema,
+  // `token` is present ONLY on the first call; replay omits it. The
+  // service layer guarantees the redaction.
+  token: z.string().min(32).optional(),
+});
+export type ActorRegisterRes = z.infer<typeof ActorRegisterResSchema>;
+
+export const ActorListResSchema = z.object({ actors: z.array(ActorSchema) });
+export type ActorListRes = z.infer<typeof ActorListResSchema>;
+
+export const ActorGetResSchema = z.object({ actor: ActorSchema });
+export type ActorGetRes = z.infer<typeof ActorGetResSchema>;
+
+export const ActorRevokeTokenResSchema = z.object({ actor: ActorSchema });
+export type ActorRevokeTokenRes = z.infer<typeof ActorRevokeTokenResSchema>;

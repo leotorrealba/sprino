@@ -8,13 +8,21 @@
  */
 
 import type { MiddlewareHandler } from 'hono';
+import type { Db } from '../db/client.ts';
 import type { ActorEntry } from './registry.ts';
 import { lookupActorByToken } from './registry.ts';
 
 export type AuthVars = {
   actor: ActorEntry;
+  db: Db;
 };
 
+/**
+ * Bearer-token middleware. Resolves to an actor via the unified DB path —
+ * env-seeded credentials and runtime-minted credentials both live in
+ * actor_tokens. Revoke is effective on the next request; no env reload
+ * needed. See auth/registry.ts for the full design rationale.
+ */
 export const tokenAuth: MiddlewareHandler<{ Variables: AuthVars }> = async (
   c,
   next,
@@ -24,7 +32,7 @@ export const tokenAuth: MiddlewareHandler<{ Variables: AuthVars }> = async (
   if (!m) {
     return c.json({ error: 'missing_or_malformed_authorization' }, 401);
   }
-  const actor = lookupActorByToken(m[1]!);
+  const actor = await lookupActorByToken(c.get('db'), m[1]!);
   if (!actor) {
     return c.json({ error: 'invalid_token' }, 403);
   }

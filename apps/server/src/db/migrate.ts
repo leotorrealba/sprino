@@ -8,25 +8,17 @@
  * in __drizzle_migrations__ table.
  *
  * After migrations apply, seeds:
- *   - SPRINO_ACTORS_JSON actors (idempotent ON CONFLICT DO NOTHING)
- *   - SPRINO_DEFAULT_PROJECT_ID project (idempotent)
+ *   - SPRINO_ACTORS_JSON via db/seed.ts (idempotent UPSERT into actors +
+ *     actor_tokens with source='env'; tokens stored as sha256 hashes only).
+ *   - SPRINO_DEFAULT_PROJECT_ID / SPRINO_PROJECTS_JSON projects.
  *
  * Seeding makes the first dev run "just work" without manual SQL.
  */
 
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { sql } from 'drizzle-orm';
 import { db, closeDb } from './client.ts';
-import { actors, projects } from './schema.ts';
-
-interface ActorEntry {
-  id: string;
-  kind: 'human' | 'agent';
-  display_name: string;
-  agent_runtime?: string | null;
-  parent_actor_id?: string | null;
-  // token is intentionally NOT persisted — it's a runtime auth secret.
-}
+import { projects } from './schema.ts';
+import { seedFromEnv } from './seed.ts';
 
 interface ProjectEntry {
   id: string;
@@ -35,28 +27,10 @@ interface ProjectEntry {
   repo_path?: string | null;
 }
 
-async function seed(): Promise<void> {
-  const json = process.env.SPRINO_ACTORS_JSON;
+async function seedProjects(): Promise<void> {
   const projectsJson = process.env.SPRINO_PROJECTS_JSON;
   const projectId = process.env.SPRINO_DEFAULT_PROJECT_ID;
   const projectSlug = process.env.SPRINO_DEFAULT_PROJECT_SLUG;
-
-  if (json) {
-    const parsed = JSON.parse(json) as ActorEntry[];
-    for (const a of parsed) {
-      await db
-        .insert(actors)
-        .values({
-          id: a.id,
-          kind: a.kind,
-          displayName: a.display_name,
-          agentRuntime: a.agent_runtime ?? null,
-          parentActorId: a.parent_actor_id ?? null,
-        })
-        .onConflictDoNothing({ target: actors.id });
-    }
-    console.log(`Seeded ${parsed.length} actor(s) from SPRINO_ACTORS_JSON`);
-  }
 
   if (projectsJson) {
     const parsed = JSON.parse(projectsJson) as ProjectEntry[];
@@ -100,7 +74,12 @@ async function main(): Promise<void> {
   await migrate(db, { migrationsFolder: './src/db/migrations' });
   console.log('Migrations applied.');
 
-  await seed();
+  const result = await seedFromEnv(db);
+  console.log(
+    `Seeded actors: imported=${result.importedActors} new_tokens=${result.newTokens} revoked_removed=${result.revokedRemoved}`,
+  );
+
+  await seedProjects();
 
   await closeDb();
   console.log('Done.');

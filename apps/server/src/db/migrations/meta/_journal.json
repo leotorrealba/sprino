@@ -15,6 +15,13 @@
       "when": 1777354800000,
       "tag": "0001_project_scoping",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777435000000,
+      "tag": "0002_actor_tokens",
+      "breakpoints": true
     }
   ]
 }

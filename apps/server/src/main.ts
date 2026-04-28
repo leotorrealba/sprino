@@ -19,10 +19,10 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import type { ActorEntry } from './auth/registry.ts';
-import { loadActorRegistry } from './auth/registry.ts';
 import { tokenAuth } from './auth/middleware.ts';
 import { db, closeDb } from './db/client.ts';
 import type { Db } from './db/client.ts';
+import { seedFromEnv } from './db/seed.ts';
 import { buildHttpRoutes } from './adapters/http/routes.ts';
 import { sseHandler } from './adapters/http/sse.ts';
 import { buildMcpRoutes } from './adapters/mcp/server.ts';
@@ -31,9 +31,10 @@ type Env = {
   Variables: { actor: ActorEntry; db: Db };
 };
 
-function buildApp(): Hono<Env> {
-  // Fail fast if SPRINO_ACTORS_JSON is missing or malformed.
-  loadActorRegistry();
+async function buildApp(): Promise<Hono<Env>> {
+  // Reconcile env-seeded actors + tokens with the DB. Idempotent: safe to
+  // re-run on every boot. Token recovery flow is "edit .env and restart".
+  await seedFromEnv(db);
 
   const app = new Hono<Env>();
 
@@ -43,7 +44,7 @@ function buildApp(): Hono<Env> {
   });
 
   app.get('/healthz', (c) =>
-    c.json({ ok: true, version: '0.0.2', protocol: 'tessera/v0.0.2' }),
+    c.json({ ok: true, version: '0.0.9', protocol: 'tessera/v0.1.2' }),
   );
 
   // /api/events/stream — SSE feed. Mounted DIRECTLY on the app (NOT under
@@ -76,7 +77,7 @@ function buildApp(): Hono<Env> {
 
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 3001);
-  const app = buildApp();
+  const app = await buildApp();
 
   const server = serve({ fetch: app.fetch, port }, (info) => {
     console.log(`Sprino server listening on http://localhost:${info.port}`);
