@@ -20,4 +20,12 @@ process.env.SPRINO_ACTORS_JSON = JSON.stringify([
     token: 'test-leo-token',
     agent_runtime: null,
   },
+  {
+    id: '018c3e7a-0001-7000-8000-0000000000a1',
+    kind: 'agent',
+    display_name: 'Test Agent',
+    token: 'test-agent-token',
+    agent_runtime: 'claude-code',
+    parent_actor_id: '018c3e7a-0001-7000-8000-000000000001',
+  },
 ]);

@@ -232,14 +232,25 @@ describe('GET /api/events endpoint', () => {
     expect(body.events[0]!.task.title).toBe('endpoint target');
   });
 
-  it('rejects limit > 200 via Zod', async () => {
+  it('rejects limit > 1000 via Zod', async () => {
     const app = buildTestApp();
     const res = await app.fetch(
       new Request(
-        `http://t/api/events?project_id=${FIXTURE_PROJECT_ID}&limit=500`,
+        `http://t/api/events?project_id=${FIXTURE_PROJECT_ID}&limit=1001`,
         { headers: { authorization: `Bearer ${FIXTURE_TOKEN}` } },
       ),
     );
     expect(res.status).toBe(400);
+  });
+
+  it('accepts limit at the max boundary (1000)', async () => {
+    const app = buildTestApp();
+    const res = await app.fetch(
+      new Request(
+        `http://t/api/events?project_id=${FIXTURE_PROJECT_ID}&limit=1000`,
+        { headers: { authorization: `Bearer ${FIXTURE_TOKEN}` } },
+      ),
+    );
+    expect(res.status).toBe(200);
   });
 });

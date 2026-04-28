@@ -8,6 +8,7 @@
  *   GET    /api/projects/resolve     → resolveProject (by slug or repo_path)
  *   GET    /api/projects/:id         → getProject
  *   GET    /api/events               → listEvents (Sprino activity feed)
+ *   GET    /api/agents               → listAgents (Sprino registry view)
  *
  * No business logic in this file. Translation only:
  *   - parse request body / query via Zod
@@ -25,10 +26,12 @@ import { Hono } from 'hono';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import {
+  AgentListReqSchema,
   EventListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
+  TaskListReqSchema,
   TaskUpdateStatusReqSchema,
 } from '../../domain/index.ts';
 import {
@@ -37,6 +40,7 @@ import {
   listProjects,
 } from '../../service/projects.ts';
 import { listEvents } from '../../service/events.ts';
+import { listAgents } from '../../service/agents.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
@@ -98,25 +102,12 @@ export function buildHttpRoutes(): Hono<Env> {
   // Not exposed via /mcp to keep the canonical protocol minimal.
   api.get('/tasks', async (c) => {
     try {
-      const projectId = c.req.query('project_id');
-      if (!projectId) {
-        return c.json(
-          { error: 'missing_project_id', message: 'query param required' },
-          400,
-        );
-      }
-      const limitRaw = c.req.query('limit');
-      const parsedLimit =
-        limitRaw !== undefined && /^-?\d+$/.test(limitRaw)
-          ? Number(limitRaw)
-          : undefined;
-      const limit =
-        parsedLimit !== undefined &&
-        Number.isFinite(parsedLimit) &&
-        Number.isInteger(parsedLimit)
-          ? parsedLimit
-          : undefined;
-      const res = await listTasks(c.get('db'), { projectId, limit });
+      const req = TaskListReqSchema.parse({
+        project_id: c.req.query('project_id'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = await listTasks(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -209,6 +200,22 @@ export function buildHttpRoutes(): Hono<Env> {
         offset: c.req.query('offset'),
       });
       const res = await listEvents(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific agent registry list — see service/agents.ts.
+  // Reads the in-memory registry loaded from SPRINO_ACTORS_JSON. Tokens
+  // are never returned. Hard cap of 100 per page (see MAX_LIMITS.agents).
+  api.get('/agents', async (c) => {
+    try {
+      const req = AgentListReqSchema.parse({
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = listAgents({ req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);

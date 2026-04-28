@@ -392,7 +392,7 @@ describe('Tessera v0.0.2 project scoping', () => {
     );
   });
 
-  it('GET /api/tasks ignores malformed limit query values', async () => {
+  it('GET /api/tasks rejects malformed limit query values with 400', async () => {
     const app = buildTestApp();
     const createReq = readFixture('task-create-happy.req.json');
 
@@ -407,9 +407,11 @@ describe('Tessera v0.0.2 project scoping', () => {
       ),
     );
 
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as { tasks: unknown[] };
-    expect(body.tasks).toHaveLength(1);
+    // Phase 6: silent clamping was replaced by a hard 400 so client bugs
+    // surface instead of returning unexpectedly truncated data.
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: string };
+    expect(body.error).toBe('validation_error');
   });
 
   it('MCP task.create resolves project from repo_path when project_id is omitted', async () => {
