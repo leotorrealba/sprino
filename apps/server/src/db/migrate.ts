@@ -78,12 +78,14 @@ async function seed(): Promise<void> {
     }
     console.log(`Seeded ${parsed.length} project(s) from SPRINO_PROJECTS_JSON`);
   } else if (projectId && projectSlug) {
+    const displayName =
+      process.env.SPRINO_DEFAULT_PROJECT_DISPLAY_NAME?.trim() || 'Sprino';
     await db
       .insert(projects)
       .values({
         id: projectId,
         slug: projectSlug,
-        displayName: 'Sprino',
+        displayName,
         repoPath: null,
       })
       .onConflictDoNothing({ target: projects.id });

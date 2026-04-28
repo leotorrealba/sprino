@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+#
+# Sprino backend image.
+#
+# Multi-stage:
+#   1. deps   — install workspace dependencies once with the frozen lockfile.
+#   2. runner — copy deps + source, run as non-root, exec migrate-then-serve.
+#
+# Migrations run on every start. They are idempotent (drizzle migrations
+# table tracks state) and they also seed the actor + project rows from
+# SPRINO_ACTORS_JSON / SPRINO_DEFAULT_PROJECT_* env vars, so the first
+# `docker compose up` produces a working stack with no manual SQL.
+
+ARG BUN_VERSION=1.3.13
+
+FROM oven/bun:${BUN_VERSION}-alpine AS deps
+WORKDIR /app
+
+# Copy only the manifests first so Docker can cache the install layer when
+# source files change but dependencies don't.
+COPY package.json bun.lock ./
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/protocol-types/package.json packages/protocol-types/package.json
+
+RUN bun install --frozen-lockfile
+
+# ---
+
+FROM oven/bun:${BUN_VERSION}-alpine AS runner
+WORKDIR /app
+
+# tini gives us proper signal forwarding so SIGTERM stops Bun cleanly.
+RUN apk add --no-cache tini
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/server/node_modules ./apps/server/node_modules
+COPY --from=deps /app/packages/protocol-types/node_modules ./packages/protocol-types/node_modules
+
+COPY package.json bun.lock ./
+COPY tsconfig.json ./tsconfig.json
+COPY packages/protocol-types ./packages/protocol-types
+COPY apps/server ./apps/server
+
+# Drop privileges. The oven/bun image ships a non-root `bun` user.
+RUN chown -R bun:bun /app
+USER bun
+
+ENV NODE_ENV=production \
+    PORT=3001
+
+EXPOSE 3001
+
+# Migrate-then-serve. If migrate fails, the container exits non-zero and
+# Compose restarts it; the server never sees a half-migrated schema.
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["sh", "-c", "cd apps/server && bun src/db/migrate.ts && exec bun src/main.ts"]
