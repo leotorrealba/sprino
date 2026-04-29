@@ -1,5 +1,14 @@
 name: pr
 
+# TypeScript on Node 20 with npm. Tolerant install: uses `npm ci` when a
+# lockfile is present, falls back to `npm install` otherwise. We deliberately
+# do not set `cache: 'npm'` on setup-node because that option fails the build
+# when no lockfile exists at the working directory.
+#
+# Monorepo tip: if your package.json lives in a subdirectory, add
+# `defaults.run.working-directory: <subdir>` to each job, or set
+# `working-directory` per step.
+
 on:
   pull_request:
     branches: [main]
@@ -13,8 +22,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
       - run: npx tsc --noEmit
 
   ts-lint:
@@ -25,8 +39,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
       - run: npx eslint .
 
   ts-test:
@@ -37,6 +56,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
       - run: npm test
