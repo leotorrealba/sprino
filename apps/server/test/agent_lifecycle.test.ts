@@ -221,6 +221,26 @@ describe('agent register request validation', () => {
     }
   });
 
+  it('requires agent_runtime to be non-empty for agent actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000035',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: '',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['agent_runtime'],
+        message: 'Required field is missing.',
+      });
+    }
+  });
+
   it('requires parent_actor_id to be a UUID for agent actor.register requests', () => {
     const req = {
       operation_id: '018c3e7a-0005-7000-8000-000000000033',
