@@ -21,6 +21,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
 import { projects } from '../src/db/schema.ts';
+import { ActorRegisterReqSchema } from '../src/domain/index.ts';
 import { transitionAgentLifecycle } from '../src/service/actors.ts';
 import {
   FIXTURE_ACTOR_ID,
@@ -816,21 +817,52 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
 
   it('rejects agent register requests missing required agent fields', async () => {
     const app = buildTestApp();
-    const req = readFixture(
-      'actor-register-invalid-kind.req.json',
-    ) as Record<string, unknown>;
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000011',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+    };
     const r = await app.fetch(
       new Request('http://test/api/actors', bearer(req)),
     );
     expect(r.status).toBe(400);
     const body = (await r.json()) as {
-      _error: { status: number; code: string; details: { field: string; reason: string } };
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
     };
     expect(body._error.status).toBe(400);
     expect(body._error.code).toBe('validation_error');
     expect(body._error.details.field).toBe('agent_runtime');
+    expect(body._error.details.reason).toBe('Required field is missing.');
+  });
+
+  it('accepts complete agent register request validation before the temporary service guard rejects it', async () => {
+    const app = buildTestApp();
+    const req = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+
+    expect(ActorRegisterReqSchema.parse(req)).toEqual(req);
+
+    const r = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+    expect(body._error.status).toBe(400);
+    expect(body._error.code).toBe('validation_error');
+    expect(body._error.details.field).toBe('kind');
     expect(body._error.details.reason).toBe(
-      'Required field is missing.',
+      'Only `human` is accepted in v0.1.2.',
     );
   });
 
