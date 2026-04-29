@@ -133,6 +133,44 @@ describe('agent register request validation', () => {
     }
   });
 
+  it('rejects human actor.register requests with malformed agent_runtime as a hybrid payload', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000014',
+      display_name: 'Ada Lovelace',
+      kind: 'human',
+      agent_runtime: 42,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['agent_runtime'],
+        message: 'Agent-only fields are not accepted for human registration.',
+      });
+    }
+  });
+
+  it('rejects human actor.register requests with malformed parent_actor_id as a hybrid payload', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000015',
+      display_name: 'Ada Lovelace',
+      kind: 'human',
+      parent_actor_id: 42,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['agent_runtime'],
+        message: 'Agent-only fields are not accepted for human registration.',
+      });
+    }
+  });
+
   it('accepts the agent actor.register request shape with runtime and parent actor', () => {
     const req = {
       operation_id: '018c3e7a-0005-7000-8000-000000000030',

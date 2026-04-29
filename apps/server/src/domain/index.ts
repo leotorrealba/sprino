@@ -308,18 +308,8 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
     .refine((kind) => kind === 'human' || kind === 'agent', {
       message: ACTOR_KIND_UNSUPPORTED,
     }),
-  agent_runtime: z
-    .string({
-      invalid_type_error: 'Must be a string.',
-    })
-    .min(1, { message: 'Required field is missing.' })
-    .optional(),
-  parent_actor_id: z
-    .string({
-      invalid_type_error: 'Must be a string.',
-    })
-    .uuid()
-    .optional(),
+  agent_runtime: z.unknown().optional(),
+  parent_actor_id: z.unknown().optional(),
 })
   .strict()
   .superRefine((req, ctx) => {
@@ -333,6 +323,7 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
         path: ['agent_runtime'],
         message: HUMAN_REGISTER_AGENT_FIELDS_REJECTED,
       });
+      return;
     }
 
     if (
@@ -345,6 +336,43 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
         path: ['agent_runtime'],
         message: AGENT_REGISTER_FIELDS_REQUIRED,
       });
+      return;
+    }
+
+    if (req.kind !== 'agent') {
+      return;
+    }
+
+    if (typeof req.agent_runtime !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: 'Must be a string.',
+      });
+    } else if (req.agent_runtime.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: 'Required field is missing.',
+      });
+    }
+
+    if (typeof req.parent_actor_id !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['parent_actor_id'],
+        message: 'Must be a string.',
+      });
+    } else {
+      const parentActorIdResult = uuid.safeParse(req.parent_actor_id);
+      if (!parentActorIdResult.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['parent_actor_id'],
+          message:
+            parentActorIdResult.error.issues[0]?.message ?? 'Invalid uuid',
+        });
+      }
     }
   })
   .transform((req): ActorRegisterReq => {
