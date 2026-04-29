@@ -7,11 +7,10 @@
  *   The browser EventSource API cannot send custom headers (no
  *   Authorization: Bearer ...). The web UI gets a Bearer-protected ticket
  *   from POST /api/events/stream-ticket, then opens
- *   GET /api/events/stream?project_id=X&ticket=Y. The ticket auths the SSE
- *   connection at handshake time only — it is NOT a session token. Once the
- *   stream is open the connection lives until the client (or server) closes
- *   it; ticket expiry is the deadline to ESTABLISH a connection, not to
- *   keep one alive.
+ *   GET /api/events/stream?project_id=X&ticket=Y. The ticket authenticates
+ *   the signed request payload only — it is NOT a session token. The SSE
+ *   handler still re-checks database credential state so token revocation
+ *   applies to both stale tickets and already-open streams.
  *
  * Format:
  *   <actor_id>.<project_id>.<exp_ms>.<base64url(HMAC-SHA256(secret, payload))>

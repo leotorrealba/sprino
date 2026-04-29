@@ -23,7 +23,9 @@
 
 import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
+import { actorTokens } from '../../db/schema.ts';
 import { listEventsAfter, latestEventId } from '../../service/events.ts';
 import {
   StreamTicketError,
@@ -39,6 +41,20 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type StreamEnv = { Variables: { db: Db } };
+
+async function actorHasActiveCredential(
+  db: Db,
+  actorId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: actorTokens.id })
+    .from(actorTokens)
+    .where(
+      and(eq(actorTokens.actorId, actorId), isNull(actorTokens.revokedAt)),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
 
 export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
   const projectId = c.req.query('project_id') ?? '';
@@ -65,6 +81,9 @@ export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
   // reload required.
   if (!(await lookupActorById(db, actorId))) {
     return c.json({ error: 'unknown_actor' }, 403);
+  }
+  if (!(await actorHasActiveCredential(db, actorId))) {
+    return c.json({ error: 'revoked_actor' }, 403);
   }
 
   const lastEventId =
@@ -114,6 +133,9 @@ export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
 
       while (!aborted && !stream.closed) {
         try {
+          if (!(await actorHasActiveCredential(db, actorId))) {
+            break;
+          }
           const fresh = await listEventsAfter(db, {
             projectId,
             afterEventId: cursor,

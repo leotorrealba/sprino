@@ -23,6 +23,9 @@ import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
 import { operations } from '../src/db/schema.ts';
 import {
+  assertCanManageActors,
+} from '../src/service/authorization.ts';
+import {
   ConcurrentRotationError,
   EnvActorImmutableError,
   LastAdminProtectedError,
@@ -32,7 +35,11 @@ import {
 } from '../src/service/actors.ts';
 import { hashToken, lookupActorByToken } from '../src/auth/registry.ts';
 import type { Actor } from '../src/domain/index.ts';
-import { FIXTURE_ACTOR_ID } from './setup.ts';
+import {
+  FIXTURE_ACTOR_ID,
+  FIXTURE_AGENT_ID,
+  seedDbActor,
+} from './setup.ts';
 
 describe('registerActor — idempotency redaction', () => {
   it('does NOT persist the plaintext token in operations.response_body', async () => {
@@ -104,6 +111,91 @@ describe('revokeToken — last-admin guard', () => {
   });
 });
 
+describe('actor admin authorization', () => {
+  it('forbids member humans from registering actors', async () => {
+    const member = await seedDbActor({
+      displayName: 'Member Human',
+      role: 'member',
+    });
+
+    await expect(
+      registerActor(db, {
+        req: {
+          operation_id: '018c3e7a-abcd-7000-8000-000000000001',
+          display_name: 'Blocked Register',
+          kind: 'human',
+        },
+        callerId: member.actorId,
+      }),
+    ).rejects.toMatchObject({
+      actorId: member.actorId,
+      capability: 'actors.manage',
+      reason: 'role_not_authorized',
+    });
+  });
+
+  it('forbids agents from revoking tokens even when their internal role is admin', async () => {
+    const minted = await registerActor(db, {
+      req: {
+        operation_id: '018c3e7a-abcd-7000-8000-000000000002',
+        display_name: 'Revoke Target',
+        kind: 'human',
+      },
+      callerId: FIXTURE_ACTOR_ID,
+    });
+
+    await expect(
+      revokeToken(db, {
+        req: {
+          operation_id: '018c3e7a-abcd-7000-8000-000000000003',
+          actor_id: minted.actor.id,
+        },
+        callerId: FIXTURE_AGENT_ID,
+      }),
+    ).rejects.toMatchObject({
+      actorId: FIXTURE_AGENT_ID,
+      capability: 'actors.manage',
+      reason: 'human_required',
+    });
+  });
+
+  it('forbids member humans from rotating tokens', async () => {
+    const member = await seedDbActor({
+      displayName: 'Rotate Member',
+      role: 'member',
+    });
+    const target = await registerActor(db, {
+      req: {
+        operation_id: '018c3e7a-abcd-7000-8000-000000000004',
+        display_name: 'Rotate Target',
+        kind: 'human',
+      },
+      callerId: FIXTURE_ACTOR_ID,
+    });
+
+    await expect(
+      rotateToken(db, {
+        actorId: target.actor.id,
+        callerId: member.actorId,
+      }),
+    ).rejects.toMatchObject({
+      actorId: member.actorId,
+      capability: 'actors.manage',
+      reason: 'role_not_authorized',
+    });
+  });
+
+  it('authorization kernel still allows human admins to manage actors', () => {
+    expect(() =>
+      assertCanManageActors({
+        id: FIXTURE_ACTOR_ID,
+        kind: 'human',
+        role: 'admin',
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe('revokeToken / rotateToken — env-actor immutability', () => {
   it('refuses to revoke an env-source actor', async () => {
     await expect(
@@ -119,7 +211,7 @@ describe('revokeToken / rotateToken — env-actor immutability', () => {
 
   it('refuses to rotate an env-source actor', async () => {
     await expect(
-      rotateToken(db, { actorId: FIXTURE_ACTOR_ID }),
+      rotateToken(db, { actorId: FIXTURE_ACTOR_ID, callerId: FIXTURE_ACTOR_ID }),
     ).rejects.toThrow(EnvActorImmutableError);
   });
 });
@@ -165,8 +257,8 @@ describe('rotateToken — race safety', () => {
     });
 
     const results = await Promise.allSettled([
-      rotateToken(db, { actorId: minted.actor.id }),
-      rotateToken(db, { actorId: minted.actor.id }),
+      rotateToken(db, { actorId: minted.actor.id, callerId: FIXTURE_ACTOR_ID }),
+      rotateToken(db, { actorId: minted.actor.id, callerId: FIXTURE_ACTOR_ID }),
     ]);
     const fulfilled = results.filter(
       (r): r is PromiseFulfilledResult<{ actor: Actor; token: string }> =>
@@ -216,7 +308,10 @@ describe('rotateToken — happy path stores hash, not plaintext', () => {
       },
       callerId: FIXTURE_ACTOR_ID,
     });
-    const rot = await rotateToken(db, { actorId: minted.actor.id });
+    const rot = await rotateToken(db, {
+      actorId: minted.actor.id,
+      callerId: FIXTURE_ACTOR_ID,
+    });
 
     const { actorTokens } = await import('../src/db/schema.ts');
     const rows = await db

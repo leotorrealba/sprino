@@ -31,6 +31,7 @@ import {
 // ────────────────────────────────────────────────────────────────────────
 
 export const actorKindEnum = pgEnum('actor_kind', ['human', 'agent']);
+export const actorRoleEnum = pgEnum('actor_role', ['admin', 'member']);
 export const taskStatusEnum = pgEnum('task_status', [
   'todo',
   'doing',
@@ -52,6 +53,7 @@ export const eventKindEnum = pgEnum('event_kind', [
 export const actors = pgTable('actors', {
   id: uuid('id').primaryKey(),
   kind: actorKindEnum('kind').notNull(),
+  role: actorRoleEnum('role').notNull().default('admin'),
   displayName: text('display_name').notNull(),
   agentRuntime: text('agent_runtime'),
   parentActorId: uuid('parent_actor_id'),

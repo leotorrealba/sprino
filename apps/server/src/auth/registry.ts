@@ -38,6 +38,7 @@ import { actors, actorTokens } from '../db/schema.ts';
 export interface ActorEntry {
   id: string;
   kind: 'human' | 'agent';
+  role: 'admin' | 'member';
   display_name: string;
   agent_runtime: string | null;
   parent_actor_id: string | null;
@@ -53,12 +54,35 @@ export interface ActorEntry {
 const ActorEnvEntrySchema = z.object({
   id: z.string().uuid(),
   kind: z.enum(['human', 'agent']),
+  role: z.enum(['admin', 'member']).optional(),
   display_name: z.string().min(1),
   token: z.string().min(8),
   agent_runtime: z.string().nullable().optional(),
   parent_actor_id: z.string().uuid().nullable().optional(),
 });
 export type ActorEnvEntry = z.infer<typeof ActorEnvEntrySchema>;
+
+type ActorRowProjection = {
+  id: string;
+  kind: 'human' | 'agent';
+  role: 'admin' | 'member';
+  displayName: string;
+  agentRuntime: string | null;
+  parentActorId: string | null;
+  source: string;
+};
+
+function rowToActorEntry(row: ActorRowProjection): ActorEntry {
+  return {
+    id: row.id,
+    kind: row.kind,
+    role: row.role,
+    display_name: row.displayName,
+    agent_runtime: row.agentRuntime,
+    parent_actor_id: row.parentActorId,
+    source: row.source as 'env' | 'db',
+  };
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // Token hashing
@@ -127,6 +151,7 @@ export async function lookupActorByToken(
     .select({
       id: actors.id,
       kind: actors.kind,
+      role: actors.role,
       displayName: actors.displayName,
       agentRuntime: actors.agentRuntime,
       parentActorId: actors.parentActorId,
@@ -143,14 +168,7 @@ export async function lookupActorByToken(
     .limit(1);
   const row = rows[0];
   if (!row) return undefined;
-  return {
-    id: row.id,
-    kind: row.kind,
-    display_name: row.displayName,
-    agent_runtime: row.agentRuntime,
-    parent_actor_id: row.parentActorId,
-    source: row.source as 'env' | 'db',
-  };
+  return rowToActorEntry(row);
 }
 
 /**
@@ -166,6 +184,7 @@ export async function lookupActorById(
     .select({
       id: actors.id,
       kind: actors.kind,
+      role: actors.role,
       displayName: actors.displayName,
       agentRuntime: actors.agentRuntime,
       parentActorId: actors.parentActorId,
@@ -176,12 +195,5 @@ export async function lookupActorById(
     .limit(1);
   const row = rows[0];
   if (!row) return undefined;
-  return {
-    id: row.id,
-    kind: row.kind,
-    display_name: row.displayName,
-    agent_runtime: row.agentRuntime,
-    parent_actor_id: row.parentActorId,
-    source: row.source as 'env' | 'db',
-  };
+  return rowToActorEntry(row);
 }

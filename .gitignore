@@ -54,3 +54,7 @@ postgres-data/
 *.pid.lock
 backups/
 PHASES3-8-TASKS.md
+
+# Internal planning artifacts (orchestrator/subagent execution docs)
+docs/superpowers/
+docs/orchestration/

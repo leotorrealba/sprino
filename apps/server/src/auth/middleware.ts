@@ -17,16 +17,17 @@ export type AuthVars = {
   db: Db;
 };
 
+export type AuthEnv = {
+  Variables: AuthVars;
+};
+
 /**
  * Bearer-token middleware. Resolves to an actor via the unified DB path —
  * env-seeded credentials and runtime-minted credentials both live in
  * actor_tokens. Revoke is effective on the next request; no env reload
  * needed. See auth/registry.ts for the full design rationale.
  */
-export const tokenAuth: MiddlewareHandler<{ Variables: AuthVars }> = async (
-  c,
-  next,
-) => {
+export const tokenAuth: MiddlewareHandler<AuthEnv> = async (c, next) => {
   const auth = c.req.header('authorization') ?? '';
   const m = /^Bearer\s+(.+)$/i.exec(auth);
   if (!m) {

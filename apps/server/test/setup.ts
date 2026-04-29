@@ -25,27 +25,28 @@
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { afterAll, beforeEach } from 'vitest';
+import { v7 as uuidv7 } from 'uuid';
 
 import { tokenAuth } from '../src/auth/middleware.ts';
-import type { ActorEntry } from '../src/auth/registry.ts';
+import type { AuthEnv } from '../src/auth/middleware.ts';
 import { closeDb, db } from '../src/db/client.ts';
-import type { Db } from '../src/db/client.ts';
-import { projects } from '../src/db/schema.ts';
+import { actors, actorTokens, projects } from '../src/db/schema.ts';
 import { seedFromEnv } from '../src/db/seed.ts';
 import { buildHttpRoutes } from '../src/adapters/http/routes.ts';
 import { sseHandler } from '../src/adapters/http/sse.ts';
 import { buildMcpRoutes } from '../src/adapters/mcp/server.ts';
+import { hashToken } from '../src/auth/registry.ts';
 
 // IDs and tokens that the conformance fixtures reference.
 export const FIXTURE_ACTOR_ID = '018c3e7a-0001-7000-8000-000000000001';
 export const FIXTURE_PROJECT_ID = '018c3e7a-0002-7000-8000-000000000001';
 export const FIXTURE_PROJECT_SLUG = 'sprino';
 export const FIXTURE_TOKEN = 'test-leo-token';
+export const FIXTURE_AGENT_ID = '018c3e7a-0001-7000-8000-0000000000a1';
+export const FIXTURE_AGENT_TOKEN = 'test-agent-token';
 
-type Env = { Variables: { actor: ActorEntry; db: Db } };
-
-export function buildTestApp(): Hono<Env> {
-  const app = new Hono<Env>();
+export function buildTestApp(): Hono<AuthEnv> {
+  const app = new Hono<AuthEnv>();
 
   app.use('*', async (c, next) => {
     c.set('db', db);
@@ -56,12 +57,12 @@ export function buildTestApp(): Hono<Env> {
   // ticket auth wins over the global Bearer middleware.
   app.get('/api/events/stream', sseHandler);
 
-  const api = new Hono<Env>();
+  const api = new Hono<AuthEnv>();
   api.use('*', tokenAuth);
   api.route('/', buildHttpRoutes());
   app.route('/api', api);
 
-  const mcp = new Hono<Env>();
+  const mcp = new Hono<AuthEnv>();
   mcp.use('*', tokenAuth);
   mcp.route('/', buildMcpRoutes());
   app.route('/mcp', mcp);
@@ -88,6 +89,35 @@ export async function resetDb(): Promise<void> {
     displayName: 'Sprino',
     repoPath: null,
   });
+}
+
+export async function seedDbActor(args: {
+  id?: string;
+  token?: string;
+  displayName: string;
+  kind?: 'human' | 'agent';
+  role?: 'admin' | 'member';
+  agentRuntime?: string | null;
+  parentActorId?: string | null;
+}): Promise<{ actorId: string; token: string }> {
+  const actorId = args.id ?? uuidv7();
+  const token = args.token ?? `test-token-${crypto.randomUUID()}`;
+  await db.insert(actors).values({
+    id: actorId,
+    kind: args.kind ?? 'human',
+    role: args.role ?? 'admin',
+    displayName: args.displayName,
+    agentRuntime: args.agentRuntime ?? null,
+    parentActorId: args.parentActorId ?? null,
+    source: 'db',
+  });
+  await db.insert(actorTokens).values({
+    id: uuidv7(),
+    actorId,
+    tokenHash: hashToken(token),
+    source: 'db',
+  });
+  return { actorId, token };
 }
 
 beforeEach(async () => {
