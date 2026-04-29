@@ -81,15 +81,40 @@ jobs:
   ts-test:
     name: ts-test
     runs-on: ubuntu-latest
+    env:
+      # DATABASE_URL is only used by the migrate step (creates tables).
+      # The test runner sets its own DATABASE_URL + SPRINO_ACTORS_JSON via
+      # apps/server/test/env-setup.ts, which is why we don't seed here.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sprino_test
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sprino_test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sprino_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          path: sprino
+      - name: Checkout tessera (sibling repo for conformance fixtures)
+        uses: actions/checkout@v4
+        with:
+          repository: leotorrealba/tessera
+          path: tessera
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - name: Install dependencies
+        working-directory: sprino
         run: |
           if [ -f bun.lock ] || [ -f bun.lockb ]; then
             bun install --frozen-lockfile
@@ -98,10 +123,9 @@ jobs:
           else
             npm install --no-audit --no-fund
           fi
+      - name: Run database migrations
+        working-directory: sprino
+        run: bun run db:migrate
       - name: Test
-        run: |
-          if [ -f bun.lock ] || [ -f bun.lockb ]; then
-            bun run test
-          else
-            npm test
-          fi
+        working-directory: sprino
+        run: bun run test
