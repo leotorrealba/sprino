@@ -52,7 +52,10 @@ SPRINO_ACTORS_JSON='[{"id":"...","kind":"human","display_name":"Recovery","token
 Restart the server. `seedFromEnv()` will:
 
 1. Insert the actor row if missing.
-2. Insert (or un-revoke) its `actor_tokens` row.
+2. Insert a fresh `actor_tokens` row for the new token hash. (If the
+   plaintext you pasted hashes to a row that's already revoked,
+   `seedFromEnv()` will hard-error and tell you to mint a new token —
+   re-using a previously-revoked credential is intentionally rejected.)
 
 You are back in. Use the Members UI to mint new db-source admins, then
 remove the recovery actor from `.env` and restart again if you want.
@@ -61,7 +64,11 @@ remove the recovery actor from `.env` and restart again if you want.
 
 The env reconciler defends against the obvious attack — flipping
 `actor_tokens.revoked_at` for env actors to lock the operator out.
-On the next restart, env-source rows are unconditionally re-activated.
+On the next restart, env-source rows whose hash is still listed in
+`SPRINO_ACTORS_JSON` and **not** previously revoked are re-imported.
+If an attacker revokes them, recovery is to rotate the env value
+(generate a new token, paste it, restart) — `seedFromEnv()` will not
+silently un-revoke a previously-revoked hash.
 
 The reconciler does **not** defend against attackers who can both write
 the database **and** read your `.env`. Treat `.env` like a private key.
