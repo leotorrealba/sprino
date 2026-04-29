@@ -265,7 +265,7 @@ export type AgentListRes = z.infer<typeof AgentListResSchema>;
 // Append-only — Tessera v0.1.2 actor lifecycle.
 // ────────────────────────────────────────────────────────────────────────
 
-const ActorRegisterReqShape = z.object({
+const ActorRegisterBaseReqShape = z.object({
   // Use distinct error messages so ZodError → ActorValidationError mapping
   // (in service/actors.ts) renders the exact strings the conformance
   // fixtures assert on.
@@ -277,27 +277,32 @@ const ActorRegisterReqShape = z.object({
     })
     .min(1, { message: 'Required field is missing.' })
     .max(200),
-  kind: z
+});
+
+const HumanActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
+  kind: z.literal('human'),
+}).strict();
+
+const AgentActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
+  kind: z.literal('agent'),
+  agent_runtime: z
+    .string({
+      required_error: 'Required field is missing.',
+      invalid_type_error: 'Must be a string.',
+    })
+    .min(1, { message: 'Required field is missing.' }),
+  parent_actor_id: z
     .string({
       required_error: 'Required field is missing.',
     })
-    .refine((v) => v === 'human', {
-      message: 'Only `human` is accepted in v0.1.2.',
-    }),
-});
+    .uuid(),
+}).strict();
 
-export const ActorRegisterReqSchema = ActorRegisterReqShape.strict().transform(
-  (v) => ({
-    operation_id: v.operation_id,
-    display_name: v.display_name,
-    kind: v.kind as 'human',
-  }),
-);
-export type ActorRegisterReq = {
-  operation_id: string;
-  display_name: string;
-  kind: 'human';
-};
+export const ActorRegisterReqSchema = z.discriminatedUnion('kind', [
+  HumanActorRegisterReqSchema,
+  AgentActorRegisterReqSchema,
+]);
+export type ActorRegisterReq = z.infer<typeof ActorRegisterReqSchema>;
 
 export const ActorListReqSchema = z
   .object({

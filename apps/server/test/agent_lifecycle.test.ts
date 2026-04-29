@@ -14,6 +14,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { db } from '../src/db/client.ts';
 import { actors } from '../src/db/schema.ts';
 import {
+  ActorRegisterReqSchema,
   ActorLifecycleStateSchema,
   AgentLifecycleTransitionIntentSchema,
 } from '../src/domain/index.ts';
@@ -60,6 +61,87 @@ async function fetchLifecycle(actorId: string): Promise<{
   if (!row) throw new Error(`missing actor ${actorId}`);
   return row;
 }
+
+describe('agent register request validation', () => {
+  it('preserves the existing human actor.register request shape', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000010',
+      display_name: 'Ada Lovelace',
+      kind: 'human',
+    };
+
+    expect(ActorRegisterReqSchema.parse(req)).toEqual(req);
+  });
+
+  it('accepts the agent actor.register request shape with runtime and parent actor', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000030',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: 'claude-code',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+
+    expect(ActorRegisterReqSchema.parse(req)).toEqual(req);
+  });
+
+  it('requires agent_runtime for agent actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000031',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['agent_runtime'],
+        message: 'Required field is missing.',
+      });
+    }
+  });
+
+  it('requires parent_actor_id for agent actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000032',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: 'claude-code',
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['parent_actor_id'],
+        message: 'Required field is missing.',
+      });
+    }
+  });
+
+  it('requires parent_actor_id to be a UUID for agent actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000033',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: 'claude-code',
+      parent_actor_id: 'not-a-uuid',
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['parent_actor_id'],
+      });
+    }
+  });
+});
 
 describe('agent lifecycle storage primitives', () => {
   it('pins the actor lifecycle enum values', async () => {

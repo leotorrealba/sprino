@@ -814,7 +814,7 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     expect(replayRevokeJson.actor.id).toBe(mintedActorId);
   });
 
-  it('rejects register with kind=agent (v0.1.2 humans-only)', async () => {
+  it('rejects agent register requests missing required agent fields', async () => {
     const app = buildTestApp();
     const req = readFixture(
       'actor-register-invalid-kind.req.json',
@@ -828,9 +828,9 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     };
     expect(body._error.status).toBe(400);
     expect(body._error.code).toBe('validation_error');
-    expect(body._error.details.field).toBe('kind');
+    expect(body._error.details.field).toBe('agent_runtime');
     expect(body._error.details.reason).toBe(
-      'Only `human` is accepted in v0.1.2.',
+      'Required field is missing.',
     );
   });
 
