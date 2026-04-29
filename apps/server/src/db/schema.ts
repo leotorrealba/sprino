@@ -90,7 +90,6 @@ export const actorTokens = pgTable(
   },
   (t) => ({
     actorIdx: index('actor_tokens_actor_idx').on(t.actorId),
-    tokenHashIdx: index('actor_tokens_token_hash_idx').on(t.tokenHash),
   }),
 );
 
