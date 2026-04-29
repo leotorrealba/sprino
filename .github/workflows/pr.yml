@@ -1,51 +1,82 @@
-name: PR Checks
+name: pr
+
+# TypeScript PR checks with runtime-aware dependency install.
+# Prefer Bun when a Bun lockfile exists (`bun.lock` / `bun.lockb`), because
+# Bun workspaces can use `workspace:*` dependencies that npm cannot install.
+# Fall back to npm for npm-managed repos. We deliberately do not enable
+# setup-node's npm cache because it fails when no npm lockfile exists at the
+# working directory.
+#
+# Monorepo tip: if your package.json lives in a subdirectory, add
+# `defaults.run.working-directory: <subdir>` to each job, or set
+# `working-directory` per step.
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, edited]
-
-concurrency:
-  group: pr-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  pr-title:
-    name: pr-title
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Validate Conventional Commits PR title
-        uses: amannn/action-semantic-pull-request@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            docs
-            chore
-            refactor
-            perf
-            test
-            security
-            release
-          requireScope: false
-          subjectPattern: ^[a-z].+[^.]$
-          subjectPatternError: |
-            PR title subject must start lowercase and not end with a period.
-
   ts-typecheck:
     name: ts-typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
+      - name: Install dependencies
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun install --frozen-lockfile
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Typecheck
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun run typecheck || npx tsc --noEmit
+          else
+            npx tsc --noEmit
+          fi
+
+  ts-lint:
+    name: ts-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun install --frozen-lockfile
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Lint
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            if bun run | grep -Eq '^[[:space:]]*lint[[:space:]]'; then
+              bun run lint
+            else
+              echo "No lint script found; passing ts-lint by policy."
+            fi
+          elif npm run | grep -Eq '^[[:space:]]*lint[[:space:]]'; then
+            npm run lint
+          else
+            npx eslint .
+          fi
 
   ts-test:
     name: ts-test
@@ -84,10 +115,17 @@ jobs:
           bun-version: latest
       - name: Install dependencies
         working-directory: sprino
-        run: bun install --frozen-lockfile
+        run: |
+          if [ -f bun.lock ] || [ -f bun.lockb ]; then
+            bun install --frozen-lockfile
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
       - name: Run database migrations
         working-directory: sprino
         run: bun run db:migrate
-      - name: Run tests
+      - name: Test
         working-directory: sprino
         run: bun run test

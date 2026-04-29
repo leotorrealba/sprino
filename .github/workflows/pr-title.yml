@@ -1,0 +1,42 @@
+name: pr-title
+
+# We use `pull_request` (not `pull_request_target`) so the workflow runs from
+# the PR head. That lets the very PR that introduces this file satisfy the
+# required `pr-title` status check — `pull_request_target` would only run the
+# version on the base branch, leaving required checks stuck at "Expected".
+# `amannn/action-semantic-pull-request` only needs `pull-requests: read`, so
+# `pull_request` is safe even for fork PRs.
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      # amannn/action-semantic-pull-request v5.5.3
+      - uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            chore
+            refactor
+            perf
+            security
+            test
+            release
+          requireScope: false
+          subjectPattern: ^[a-z].+[^.]$
+          subjectPatternError: |
+            The subject "{subject}" must start with a lowercase letter and not end with a period.
