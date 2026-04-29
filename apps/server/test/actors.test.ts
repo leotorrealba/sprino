@@ -25,6 +25,7 @@ import { operations } from '../src/db/schema.ts';
 import {
   assertCanManageActors,
 } from '../src/service/authorization.ts';
+import { IdempotencyConflictError } from '../src/service/idempotency.ts';
 import {
   ConcurrentRotationError,
   EnvActorImmutableError,
@@ -79,6 +80,94 @@ describe('registerActor — idempotency redaction', () => {
     expect('token' in first).toBe(true);
     expect('token' in replay).toBe(false);
     expect(replay.actor.id).toBe(first.actor.id);
+  });
+
+  it('registers agent actors with runtime and human parent while preserving redaction', async () => {
+    const opId = '018c3e7a-aaaa-7000-8000-000000000003';
+    const first = await registerActor(db, {
+      req: {
+        operation_id: opId,
+        display_name: 'Claude Code Session',
+        kind: 'agent',
+        agent_runtime: 'claude-code',
+        parent_actor_id: FIXTURE_ACTOR_ID,
+      },
+      callerId: FIXTURE_ACTOR_ID,
+    });
+
+    expect(first).toMatchObject({
+      actor: {
+        kind: 'agent',
+        display_name: 'Claude Code Session',
+        agent_runtime: 'claude-code',
+        parent_actor_id: FIXTURE_ACTOR_ID,
+      },
+    });
+    expect('token' in first).toBe(true);
+
+    const rows = await db
+      .select({ body: operations.responseBody })
+      .from(operations)
+      .where(eq(operations.operationId, opId));
+    expect(rows).toHaveLength(1);
+    const body = rows[0]!.body as Record<string, unknown>;
+    expect(body).toEqual({
+      actor: {
+        id: first.actor.id,
+        kind: 'agent',
+        display_name: 'Claude Code Session',
+        agent_runtime: 'claude-code',
+        parent_actor_id: FIXTURE_ACTOR_ID,
+        created_at: first.actor.created_at,
+      },
+    });
+    expect(body).not.toHaveProperty('token');
+  });
+
+  it('replays agent registration as {actor} only', async () => {
+    const req = {
+      operation_id: '018c3e7a-aaaa-7000-8000-000000000004',
+      display_name: 'Claude Code Replay',
+      kind: 'agent' as const,
+      agent_runtime: 'claude-code',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+
+    const first = await registerActor(db, { req, callerId: FIXTURE_ACTOR_ID });
+    const replay = await registerActor(db, { req, callerId: FIXTURE_ACTOR_ID });
+
+    expect('token' in first).toBe(true);
+    expect(replay).toEqual({ actor: first.actor });
+    expect('token' in replay).toBe(false);
+  });
+
+  it('surfaces idempotency conflict before fresh agent parent validation on same operation_id', async () => {
+    const first = await registerActor(db, {
+      req: {
+        operation_id: '018c3e7a-aaaa-7000-8000-000000000005',
+        display_name: 'Claude Code Conflict',
+        kind: 'agent',
+        agent_runtime: 'claude-code',
+        parent_actor_id: FIXTURE_ACTOR_ID,
+      },
+      callerId: FIXTURE_ACTOR_ID,
+    });
+
+    await expect(
+      registerActor(db, {
+        req: {
+          operation_id: '018c3e7a-aaaa-7000-8000-000000000005',
+          display_name: 'Claude Code Conflict',
+          kind: 'agent',
+          agent_runtime: 'claude-code',
+          parent_actor_id: '018c3e7a-aaaa-7000-8000-0000000000ff',
+        },
+        callerId: FIXTURE_ACTOR_ID,
+      }),
+    ).rejects.toMatchObject({
+      name: 'IdempotencyConflictError',
+      cachedResponse: { actor: first.actor },
+    } satisfies Partial<IdempotencyConflictError>);
   });
 });
 

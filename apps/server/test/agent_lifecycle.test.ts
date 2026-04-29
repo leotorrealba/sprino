@@ -19,10 +19,12 @@ import {
   AgentLifecycleTransitionIntentSchema,
 } from '../src/domain/index.ts';
 import {
+  ActorValidationError,
+  registerActor,
   ActorLifecycleTransitionError,
   transitionAgentLifecycle,
 } from '../src/service/actors.ts';
-import { FIXTURE_ACTOR_ID } from './setup.ts';
+import { FIXTURE_ACTOR_ID, seedDbActor } from './setup.ts';
 
 const AGENT_REGISTER_FIELDS_REQUIRED =
   'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
@@ -165,7 +167,7 @@ describe('agent register request validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0]).toMatchObject({
-        path: ['agent_runtime'],
+        path: ['parent_actor_id'],
         message: 'Agent-only fields are not accepted for human registration.',
       });
     }
@@ -215,7 +217,7 @@ describe('agent register request validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0]).toMatchObject({
-        path: ['agent_runtime'],
+        path: ['parent_actor_id'],
         message: AGENT_REGISTER_FIELDS_REQUIRED,
       });
     }
@@ -237,6 +239,26 @@ describe('agent register request validation', () => {
       expect(result.error.issues[0]).toMatchObject({
         path: ['agent_runtime'],
         message: 'Required field is missing.',
+      });
+    }
+  });
+
+  it('requires agent_runtime to be at most 120 characters for agent actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000036',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: 'a'.repeat(121),
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['agent_runtime'],
+        message: 'Must be at most 120 characters.',
       });
     }
   });
@@ -448,6 +470,51 @@ describe('agent lifecycle storage primitives', () => {
 });
 
 describe('agent lifecycle domain and service transitions', () => {
+  it('rejects agent registration when the parent actor does not exist', async () => {
+    await expect(
+      registerActor(db, {
+        req: {
+          operation_id: '018c3e7a-0005-7000-8000-000000000040',
+          display_name: 'Orphan Agent',
+          kind: 'agent',
+          agent_runtime: 'claude-code',
+          parent_actor_id: '018c3e7a-0005-7000-8000-0000000000ff',
+        },
+        callerId: FIXTURE_ACTOR_ID,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ActorValidationError',
+      field: 'parent_actor_id',
+      reason: 'Parent actor does not exist.',
+    } satisfies Partial<ActorValidationError>);
+  });
+
+  it('rejects agent registration when the parent actor is not human', async () => {
+    const parent = await seedDbActor({
+      displayName: 'Agent Parent',
+      kind: 'agent',
+      agentRuntime: 'claude-code',
+      parentActorId: FIXTURE_ACTOR_ID,
+    });
+
+    await expect(
+      registerActor(db, {
+        req: {
+          operation_id: '018c3e7a-0005-7000-8000-000000000041',
+          display_name: 'Nested Agent',
+          kind: 'agent',
+          agent_runtime: 'claude-code',
+          parent_actor_id: parent.actorId,
+        },
+        callerId: FIXTURE_ACTOR_ID,
+      }),
+    ).rejects.toMatchObject({
+      name: 'ActorValidationError',
+      field: 'parent_actor_id',
+      reason: 'Parent actor must reference a human actor.',
+    } satisfies Partial<ActorValidationError>);
+  });
+
   it('pins the internal lifecycle state and transition intent domains', () => {
     expect(ActorLifecycleStateSchema.options).toEqual(['active', 'inactive']);
     expect(AgentLifecycleTransitionIntentSchema.options).toEqual([

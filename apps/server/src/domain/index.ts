@@ -285,6 +285,7 @@ const HUMAN_REGISTER_AGENT_FIELDS_REJECTED =
   'Agent-only fields are not accepted for human registration.';
 const ACTOR_KIND_UNSUPPORTED =
   'Only `human` or `agent` is accepted.';
+const AGENT_RUNTIME_MAX_LENGTH = 120;
 
 export type ActorRegisterReq =
   | {
@@ -318,9 +319,14 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
       (req.agent_runtime !== undefined ||
         req.parent_actor_id !== undefined)
     ) {
+      const path =
+        req.agent_runtime === undefined &&
+        req.parent_actor_id !== undefined
+          ? ['parent_actor_id']
+          : ['agent_runtime'];
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['agent_runtime'],
+        path,
         message: HUMAN_REGISTER_AGENT_FIELDS_REJECTED,
       });
       return;
@@ -331,9 +337,14 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
       (req.agent_runtime === undefined ||
         req.parent_actor_id === undefined)
     ) {
+      const path =
+        req.agent_runtime !== undefined &&
+        req.parent_actor_id === undefined
+          ? ['parent_actor_id']
+          : ['agent_runtime'];
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['agent_runtime'],
+        path,
         message: AGENT_REGISTER_FIELDS_REQUIRED,
       });
       return;
@@ -354,6 +365,12 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
         code: z.ZodIssueCode.custom,
         path: ['agent_runtime'],
         message: 'Required field is missing.',
+      });
+    } else if (req.agent_runtime.length > AGENT_RUNTIME_MAX_LENGTH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: `Must be at most ${AGENT_RUNTIME_MAX_LENGTH} characters.`,
       });
     }
 

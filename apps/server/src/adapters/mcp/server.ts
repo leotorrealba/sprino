@@ -152,16 +152,38 @@ const TOOL_DEFINITIONS = [
   {
     name: 'sprino.actor.register',
     description:
-      'Register a new human actor (Tessera v0.1.2). Idempotent via operation_id (UUIDv7). Returns {actor, token} on first call; replay returns {actor} only — plaintext token is shown exactly once.',
+      "Register a new actor (Tessera v0.1.2). Idempotent via operation_id (UUIDv7). Returns {actor, token} on first call; replay returns {actor} only and never replays the plaintext token. Use kind='human' for people. Use kind='agent' for agent sessions; agent registrations must also provide agent_runtime and parent_actor_id.",
     inputSchema: {
-      type: 'object',
-      required: ['operation_id', 'display_name', 'kind'],
-      additionalProperties: false,
-      properties: {
-        operation_id: { type: 'string', format: 'uuid' },
-        display_name: { type: 'string', minLength: 1, maxLength: 200 },
-        kind: { type: 'string', enum: ['human'] },
-      },
+      oneOf: [
+        {
+          type: 'object',
+          required: ['operation_id', 'display_name', 'kind'],
+          additionalProperties: false,
+          properties: {
+            operation_id: { type: 'string', format: 'uuid' },
+            display_name: { type: 'string', minLength: 1, maxLength: 200 },
+            kind: { const: 'human' },
+          },
+        },
+        {
+          type: 'object',
+          required: [
+            'operation_id',
+            'display_name',
+            'kind',
+            'agent_runtime',
+            'parent_actor_id',
+          ],
+          additionalProperties: false,
+          properties: {
+            operation_id: { type: 'string', format: 'uuid' },
+            display_name: { type: 'string', minLength: 1, maxLength: 200 },
+            kind: { const: 'agent' },
+            agent_runtime: { type: 'string', minLength: 1, maxLength: 120 },
+            parent_actor_id: { type: 'string', format: 'uuid' },
+          },
+        },
+      ],
     },
   },
   {
