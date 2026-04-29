@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. v0.0.0 = empty scaffold; v0.1.0 lands at the end of phase 8.
+**Status:** pre-alpha. Active development. Latest release: [**v0.0.9**](https://github.com/leotorrealba/sprino/releases/tag/v0.0.9) — actor lifecycle (Tessera v0.1.2), in-app Members tab, two-source actor model.
 
 ## Why
 
