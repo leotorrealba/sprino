@@ -55,6 +55,7 @@ import {
   LastAdminProtectedError,
   getActor,
   listActors,
+  listMembers,
   registerActor,
   revokeToken,
   rotateToken,
@@ -293,7 +294,10 @@ export function buildHttpRoutes(): Hono<Env> {
     try {
       const kind = c.req.query('kind');
       const req = ActorListReqSchema.parse(kind ? { kind } : {});
-      const res = await listActors(c.get('db'), { req });
+      // Sprino-internal: surface source + revoked_at so the Members UI
+      // can distinguish env vs db actors and render revocation status.
+      // MCP `actor.list` continues to return the canonical Tessera shape.
+      const res = await listMembers(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return actorErrorResponse(c, err);

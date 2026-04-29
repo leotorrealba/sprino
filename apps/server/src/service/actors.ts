@@ -275,6 +275,84 @@ export async function getActor(
 }
 
 // ────────────────────────────────────────────────────────────────────────
+// listMembers — Sprino-internal, not Tessera
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Members API (Sprino-internal): returns Actor + provenance + revocation
+ * status enriched from `actor_tokens`. Used by the web Members UI to
+ * distinguish env-source rows (which the UI must NOT offer rotate/revoke
+ * for — recovery is "edit .env and restart") from db-source rows, and to
+ * render an "active vs revoked" badge.
+ *
+ * NOT exposed via MCP — the Tessera `actor.list` verb returns the bare
+ * canonical `Actor` shape and stays in lockstep with the protocol spec.
+ * Adding `source` / `revoked_at` to the Tessera shape would force every
+ * other implementer to surface them too, which isn't justified by the
+ * spec. Keep it Sprino-only.
+ */
+export type Member = Actor & {
+  source: 'env' | 'db';
+  // ISO8601 timestamp of the most-recent revocation if the actor has zero
+  // active tokens; null while at least one token is active. Computed from
+  // actor_tokens, not from a column on actors.
+  revoked_at: string | null;
+};
+
+export async function listMembers(
+  db: Db,
+  args: { req: ActorListReq },
+): Promise<{ actors: Member[] }> {
+  const actorRows = await (args.req.kind
+    ? db
+        .select()
+        .from(actors)
+        .where(eq(actors.kind, args.req.kind))
+        .orderBy(asc(actors.id))
+    : db.select().from(actors).orderBy(asc(actors.id)));
+  if (actorRows.length === 0) return { actors: [] };
+
+  const actorIds = actorRows.map((r) => r.id);
+  const tokenRows = await db
+    .select({
+      actorId: actorTokens.actorId,
+      revokedAt: actorTokens.revokedAt,
+      createdAt: actorTokens.createdAt,
+    })
+    .from(actorTokens)
+    .where(inArray(actorTokens.actorId, actorIds));
+
+  // For each actor: revoked_at = null if any active token exists; else the
+  // most recent revoked_at (so the UI can show *when* the last credential
+  // was revoked). Single pass, O(tokens) — no extra round-trip per actor.
+  const statusByActor = new Map<string, string | null>();
+  for (const t of tokenRows) {
+    const cur = statusByActor.get(t.actorId);
+    if (t.revokedAt === null) {
+      statusByActor.set(t.actorId, null);
+      continue;
+    }
+    if (cur === null) continue;
+    const candidate = t.revokedAt.toISOString();
+    if (cur === undefined || candidate > cur) {
+      statusByActor.set(t.actorId, candidate);
+    }
+  }
+
+  return {
+    actors: actorRows.map((r) => ({
+      ...rowToActor(r),
+      source: r.source as 'env' | 'db',
+      revoked_at: statusByActor.has(r.id)
+        ? (statusByActor.get(r.id) ?? null)
+        : // No tokens at all → treat as revoked at the actor's createdAt
+          // so the UI doesn't render "active" for a credential-less row.
+          r.createdAt.toISOString(),
+    })),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────
 // revoke_token
 // ────────────────────────────────────────────────────────────────────────
 
