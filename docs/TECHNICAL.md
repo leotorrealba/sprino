@@ -320,6 +320,73 @@ us about a commercial license.
 
 ---
 
+## 10b. Actor lifecycle (v0.0.9)
+
+The v0.0.9 release replaced the in-memory env-only actor registry with
+a single SQL-backed auth path. Three properties are load-bearing:
+
+**Token format.** Plaintext bearer tokens are 24 random bytes,
+base64url-encoded (no padding) when minted in-app. The database stores
+only `sha256(plaintext)` (hex) in `actor_tokens.token_hash`. Plaintext
+appears exactly twice: in the HTTP/MCP response that mints it, and in
+the one-time-reveal dialog in the Members UI.
+
+**Single auth path.** The bearer middleware always queries
+`actor_tokens` joined to `actors`. There is no fallback to the env
+registry at request time. Env actors are imported into the database on
+boot by `seedFromEnv()` (`apps/server/src/db/seed.ts`), which:
+
+1. Inserts any new env actors with `source='env'`.
+2. Inserts each env token row if no row with that hash exists yet. If a
+   row with the same `token_hash` is already present and **active**, no
+   change is made (idempotent restart). If it is present and **revoked**,
+   `seedFromEnv()` rejects with a hard error: re-introducing a
+   previously-revoked credential is treated as a security smell, and the
+   error message tells the operator to mint a fresh token instead.
+3. Never deletes — actors removed from the env stay in the database
+   for audit history but have no active token.
+
+**Race-safe rotate.** `actor_tokens` carries a partial unique index:
+
+```sql
+CREATE UNIQUE INDEX actor_tokens_active_actor_idx
+  ON actor_tokens (actor_id) WHERE revoked_at IS NULL;
+```
+
+Postgres enforces "at most one active token per actor" as a hard
+invariant. The `rotateToken` service snapshots the current active
+token IDs *before* opening the transaction, then inside the
+transaction issues `UPDATE ... WHERE id IN (snapshot) AND revoked_at
+IS NULL RETURNING id`. If `rowsAffected !== snapshot.length`, another
+caller won the race and we throw `ConcurrentRotationError`. The
+partial unique index is the backstop if any other code path forgets
+the check.
+
+**Idempotency redaction.** `actor.register` is idempotent on
+`operation_id`, like every other Tessera write verb. To avoid leaking
+plaintext tokens through the idempotency cache, the service writes a
+redacted body — just `{ actor }`, with no `token` field — to
+`operations.response_body`. On a same-`operation_id` replay (whether
+through `checkIdempotency` or the post-INSERT race fallback), the
+caller gets back that same `{ actor }` shape. The plaintext token is
+returned exactly once — on the original successful call — and is
+never recoverable from the database. A caller that lost it must call
+`actor.revoke_token` and re-register.
+
+**Last-admin guard.** `revokeToken` checks whether the actor is the
+only human with an active token and refuses with `409
+last_admin_protected` — that's the path that could leave the system
+without an admin credential. `rotateToken` does **not** need this
+guard because rotate is atomic revoke + insert in a single
+transaction: the actor still ends with one active token after the
+call, so the system-wide active-human count is preserved. Env-source
+actors are rejected by both verbs with `400 operation_unsupported`
+(error class `EnvActorImmutableError`) — operators rotate them by
+editing `.env` and restarting, which is the documented break-glass
+path (`docs/TOKEN-RECOVERY.md`).
+
+---
+
 ## 11. Where to go next
 
 - New to the project? Read [`docs/EXPLAINED.md`](./EXPLAINED.md).

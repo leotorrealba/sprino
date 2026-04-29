@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
 import { ActivityFeed } from './components/ActivityFeed';
+import { Members } from './components/Members';
 
 type LoadState = 'idle' | 'loading' | 'error';
+type View = 'tasks' | 'members';
 
 const STATUSES: TaskStatus[] = ['todo', 'doing', 'done', 'blocked'];
 
@@ -45,6 +47,7 @@ export function App() {
     () => localStorage.getItem(PROJECT_STORAGE_KEY) ?? '',
   );
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [view, setView] = useState<View>('tasks');
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -185,7 +188,7 @@ export function App() {
           <div className="mx-auto max-w-4xl px-6 py-4">
             <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
             <p className="text-xs text-slate-500">
-              Tessera v0.0.2 reference impl
+              Tessera v0.1.2 reference impl
             </p>
           </div>
         </header>
@@ -220,10 +223,32 @@ export function App() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
             <p className="text-xs text-slate-500">
-              Tessera v0.0.2 reference impl
+              Tessera v0.1.2 reference impl
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <nav className="flex gap-1 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
+              <button
+                onClick={() => setView('tasks')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'tasks'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Tasks
+              </button>
+              <button
+                onClick={() => setView('members')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'members'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Members
+              </button>
+            </nav>
             <select
               value={selectedProjectId}
               onChange={(e) => {
@@ -262,7 +287,11 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-4xl px-6 py-8">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+        {view === 'members' ? (
+          <Members token={token} />
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-700">
               {activeProject?.display_name ?? 'Project'}
@@ -345,6 +374,8 @@ export function App() {
         )}
 
         <ActivityFeed token={token} projectId={selectedProjectId} />
+          </>
+        )}
       </main>
     </div>
   );

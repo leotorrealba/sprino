@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sprino — reference implementation of Tessera
 /**
- * Agents service — read-only registry view.
+ * Agents service — read-only registry view (Sprino-only `agents.list`).
  *
- * Phase 6 (resource limits) introduces `agents.list` so dogfood UIs and
- * MCP clients can enumerate the agent actors registered with this Sprino
- * instance. Agent identities live in the in-memory registry loaded from
- * `SPRINO_ACTORS_JSON` (see auth/registry.ts) — there is no separate
- * `agents` table in v0.0.x.
- *
- * Tokens are NEVER returned. Callers see id/kind/display_name/runtime/parent
- * only. The handler runs after auth middleware, so any caller already had
- * a valid token before reaching this code path.
+ * v0.0.9: backed by the DB (actors WHERE kind='agent') instead of the
+ * deprecated in-memory env registry. Both env-seeded and runtime-minted
+ * agents appear here. Tokens are NEVER returned.
  */
 
-import { loadActorRegistry } from '../auth/registry.ts';
+import { asc, eq } from 'drizzle-orm';
+import type { Db } from '../db/client.ts';
+import { actors } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
   type Agent,
@@ -22,24 +18,25 @@ import {
   type AgentListRes,
 } from '../domain/index.ts';
 
-export function listAgents(args: { req: AgentListReq }): AgentListRes {
-  // Bounds (limit ≤ 100, offset ≥ 0) are enforced by AgentListReqSchema.
+export async function listAgents(
+  db: Db,
+  args: { req: AgentListReq },
+): Promise<AgentListRes> {
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
 
-  const all: Agent[] = [];
-  for (const entry of loadActorRegistry().values()) {
-    if (entry.kind !== 'agent') continue;
-    all.push({
-      id: entry.id,
-      kind: 'agent',
-      display_name: entry.display_name,
-      agent_runtime: entry.agent_runtime ?? null,
-      parent_actor_id: entry.parent_actor_id ?? null,
-    });
-  }
-  // Stable order across calls so pagination is deterministic.
-  all.sort((a, b) => a.id.localeCompare(b.id));
+  const rows = await db
+    .select()
+    .from(actors)
+    .where(eq(actors.kind, 'agent'))
+    .orderBy(asc(actors.id));
 
+  const all: Agent[] = rows.map((r) => ({
+    id: r.id,
+    kind: 'agent',
+    display_name: r.displayName,
+    agent_runtime: r.agentRuntime,
+    parent_actor_id: r.parentActorId,
+  }));
   return { agents: all.slice(offset, offset + limit) };
 }

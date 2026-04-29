@@ -35,6 +35,10 @@ import {
   TaskGetReqSchema,
   TaskListReqSchema,
   TaskUpdateStatusReqSchema,
+  ActorRegisterReqSchema,
+  ActorListReqSchema,
+  ActorGetReqSchema,
+  ActorRevokeTokenReqSchema,
 } from '../../domain/index.ts';
 import {
   ProjectNotFoundError,
@@ -43,6 +47,19 @@ import {
 } from '../../service/projects.ts';
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
+import {
+  ActorNotFoundError,
+  ActorValidationError,
+  ConcurrentRotationError,
+  EnvActorImmutableError,
+  LastAdminProtectedError,
+  getActor,
+  listActors,
+  listMembers,
+  registerActor,
+  revokeToken,
+  rotateToken,
+} from '../../service/actors.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
@@ -210,15 +227,15 @@ export function buildHttpRoutes(): Hono<Env> {
   });
 
   // Sprino-specific agent registry list — see service/agents.ts.
-  // Reads the in-memory registry loaded from SPRINO_ACTORS_JSON. Tokens
-  // are never returned. Hard cap of 100 per page (see MAX_LIMITS.agents).
+  // Reads the actors table (DB-unified after v0.0.9). Tokens are never
+  // returned. Hard cap of 100 per page (see MAX_LIMITS.agents).
   api.get('/agents', async (c) => {
     try {
       const req = AgentListReqSchema.parse({
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
-      const res = listAgents({ req });
+      const res = await listAgents(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -251,7 +268,228 @@ export function buildHttpRoutes(): Hono<Env> {
     }
   });
 
+  // ── Tessera v0.1.2 actor lifecycle ──────────────────────────────────
+  // These endpoints use the `_error` envelope (per the v0.1.2 conformance
+  // fixtures) instead of the flat error shape used by tasks/projects. The
+  // shape divergence is intentional — Tessera is migrating toward the
+  // envelope, but breaking task error shapes at the same time would
+  // explode the conformance diff. See plan §Slice K for the rationale.
+
+  api.post('/actors', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = ActorRegisterReqSchema.parse(body);
+      const actor = c.get('actor');
+      const res = await registerActor(c.get('db'), {
+        req,
+        callerId: actor.id,
+      });
+      return c.json(res, 201);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
+  api.get('/actors', async (c) => {
+    try {
+      const kind = c.req.query('kind');
+      const req = ActorListReqSchema.parse(kind ? { kind } : {});
+      // Sprino-internal: surface source + revoked_at so the Members UI
+      // can distinguish env vs db actors and render revocation status.
+      // MCP `actor.list` continues to return the canonical Tessera shape.
+      const res = await listMembers(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
+  api.get('/actors/:id', async (c) => {
+    try {
+      const req = ActorGetReqSchema.parse({ actor_id: c.req.param('id') });
+      const res = await getActor(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
+  api.post('/actors/:id/revoke_token', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = ActorRevokeTokenReqSchema.parse({
+        ...body,
+        actor_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await revokeToken(c.get('db'), {
+        req,
+        callerId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
+  // Sprino-only HTTP extension. NOT a Tessera verb — operators "I lost the
+  // token" recovery flow only. No idempotency: every successful call mints
+  // and returns a fresh plaintext.
+  api.post('/actors/:id/rotate_token', async (c) => {
+    try {
+      const res = await rotateToken(c.get('db'), {
+        actorId: c.req.param('id'),
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
   return api;
+}
+
+/**
+ * Translate ZodError + actor service errors into the Tessera v0.1.2
+ * `_error` envelope: `{ _error: { status, code, details: { field, reason } } }`.
+ *
+ * Pulled out into its own helper so the canonical task/project endpoints
+ * (which use the legacy flat shape) don't accidentally inherit envelope
+ * semantics. Two adapters, two shapes — until Tessera v0.2 unifies.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function actorErrorResponse(c: any, err: unknown): Response {
+  if (err instanceof ZodError) {
+    const issue = err.issues[0]!;
+    const field = issue.path.length > 0 ? String(issue.path[0]) : 'request';
+    return c.json(
+      {
+        _error: {
+          status: 400,
+          code: 'validation_error',
+          details: { field, reason: issue.message },
+        },
+      },
+      400,
+    );
+  }
+  if (err instanceof ActorValidationError) {
+    return c.json(
+      {
+        _error: {
+          status: 400,
+          code: 'validation_error',
+          details: { field: err.field, reason: err.reason },
+        },
+      },
+      400,
+    );
+  }
+  if (err instanceof ActorNotFoundError) {
+    return c.json(
+      {
+        _error: {
+          status: 404,
+          code: 'not_found',
+          details: {
+            field: 'actor_id',
+            reason: 'No actor with this id.',
+          },
+        },
+      },
+      404,
+    );
+  }
+  if (err instanceof LastAdminProtectedError) {
+    return c.json(
+      {
+        _error: {
+          status: 409,
+          code: 'last_admin_protected',
+          details: {
+            field: 'actor_id',
+            reason:
+              'Refusing to revoke the last active human credential. Mint another human first.',
+          },
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof EnvActorImmutableError) {
+    return c.json(
+      {
+        _error: {
+          status: 400,
+          code: 'operation_unsupported',
+          details: {
+            field: 'actor_id',
+            reason:
+              'Actor is sourced from SPRINO_ACTORS_JSON; recover via .env, not the API.',
+          },
+        },
+      },
+      400,
+    );
+  }
+  if (err instanceof ConcurrentRotationError) {
+    return c.json(
+      {
+        _error: {
+          status: 409,
+          code: 'concurrent_rotation',
+          details: {
+            field: 'actor_id',
+            reason: 'Concurrent rotate_token detected. Retry once.',
+          },
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof IdempotencyConflictError) {
+    return c.json(
+      {
+        _error: {
+          status: 409,
+          code: 'operation_id_conflict',
+          details: {
+            field: 'operation_id',
+            reason:
+              'operation_id reused with a different request payload.',
+          },
+        },
+        cached_response: err.cachedResponse,
+      },
+      409,
+    );
+  }
+  if (err instanceof OperationExpiredError) {
+    return c.json(
+      {
+        _error: {
+          status: 410,
+          code: 'operation_expired',
+          details: {
+            field: 'operation_id',
+            reason: 'operation_id is past retention.',
+          },
+        },
+      },
+      410,
+    );
+  }
+  console.error('Unhandled actor endpoint error:', err);
+  return c.json(
+    {
+      _error: {
+        status: 500,
+        code: 'internal_error',
+        details: { field: 'request', reason: 'Internal server error.' },
+      },
+    },
+    500,
+  );
 }
 
 function parseLimitOffset(

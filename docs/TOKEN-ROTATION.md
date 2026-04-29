@@ -1,9 +1,32 @@
 # Rotating Sprino actor tokens
 
+> **v0.0.9 update.** Sprino now distinguishes two kinds of actors:
+>
+> - **`source: 'db'`** — humans registered through the Members UI or
+>   the `actor.register` Tessera verb (v0.1.2 is humans-only; agent
+>   registration arrives in a follow-up). Tokens for these actors can
+>   be rotated **without restarting the server**: hit the "rotate"
+>   button in the Members tab, or `POST /api/actors/:id/rotate_token`.
+>   The new plaintext is shown once; the old token stops working
+>   immediately because the auth middleware queries `actor_tokens` on
+>   every request — there is no in-memory cache for db-source tokens.
+> - **`source: 'env'`** — actors declared in `SPRINO_ACTORS_JSON`.
+>   These are still rotated via the env-edit + restart flow described
+>   below. The Members UI shows them with an "edit .env to rotate"
+>   hint and disables the rotate/revoke buttons. This is intentional:
+>   env-source actors are your **break-glass recovery path** if the
+>   database is unreachable or the last db-admin is gone.
+>
+> See `docs/TOKEN-RECOVERY.md` for the recovery playbook (last-admin
+> lockout, lost token, compromised db, etc.).
+
 Sprino actors (humans and agents) authenticate to the API and to MCP with
-opaque bearer tokens. In the v0.x self-hosted setup, tokens live in the
+opaque bearer tokens. For env-source actors, tokens live in the
 `SPRINO_ACTORS_JSON` environment variable, loaded from `.env` at server
-start. This document is the playbook for replacing one of those tokens.
+start and imported into the `actor_tokens` table on each boot. This
+document is the playbook for replacing one of those env-source tokens.
+For db-source actors, use the Members UI rotate button instead — no
+restart required.
 
 > **Audience.** Whoever runs the Sprino instance. If you can edit `.env`
 > and recreate a Compose service, you can rotate a token.
@@ -25,15 +48,19 @@ If none of those apply, you don't need to rotate.
 
 ## What rotation does (and doesn't)
 
-The actor registry is **loaded into memory once at server startup** and
-cached for the life of the process (see
-`apps/server/src/auth/registry.ts`). Editing `.env` while the server is
-running has no effect — the registry only reloads when the server
-restarts.
+For **env-source** actors, the auth path imports tokens from
+`SPRINO_ACTORS_JSON` into the `actor_tokens` table at server boot
+(see `apps/server/src/db/seed.ts`). Editing `.env` while the server is
+running has no effect — the import only runs at startup, so a restart
+is required for the new token to be picked up. For **db-source**
+actors, rotate goes through the API and takes effect immediately
+without restart.
 
-That has two consequences worth understanding before you start:
+That has two consequences worth understanding before you start an
+env-source rotation:
 
-1. **A restart is required.** There is no SIGHUP-style reload yet.
+1. **A restart is required.** There is no SIGHUP-style reload yet for
+   env-source tokens.
 2. **Old operations stay valid.** Tokens are an authentication concern,
    not an authorization one — the rotated token can no longer create
    *new* events, but every event that was already written into the log

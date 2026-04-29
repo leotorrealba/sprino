@@ -40,6 +40,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.5** (phase 5) — Tessera v0.1.0 stabilization, conformance fixtures locked, deprecation policy, semver guarantees
 - **v0.0.6** (phase 6) — buffer + hardening: pagination contract on `events.list` / `tasks.list` / `agents.list`, SSE realtime fallback, nightly `pg_dump` backup sidecar with `docs/RESTORE.md` playbook
 - **v0.0.7** (phase 7) — 30-minute self-host bundle: server + web Dockerfiles, `bootstrap.sh`, `docs/TOKEN-ROTATION.md`, README walkthrough
+- **v0.0.9** (phase 9) — Tessera v0.1.2 actor lifecycle: `actor.register` / `list` / `get` / `revoke_token` verbs, in-app Members tab with rotate/revoke, two-source actor model (env + db) with break-glass recovery, single-SQL auth path, race-safe rotate
 - **v0.0.x** — vertical slices, one per phase, through phase 8
 - **v0.1.0** (phase 8) — first public release, self-host walkthrough, Tessera v0.1 milestone
 
@@ -84,7 +85,11 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
   playbook for restoring from one of those files.
 - **Rotating tokens:** [`docs/TOKEN-ROTATION.md`](./docs/TOKEN-ROTATION.md)
   — how to replace an actor's bearer token (planned rotation, leak
-  response, or full reset).
+  response, or full reset). v0.0.9 added in-app rotation for db-source
+  actors via the Members tab.
+- **Recovering access:** [`docs/TOKEN-RECOVERY.md`](./docs/TOKEN-RECOVERY.md)
+  — break-glass playbook for last-admin lockout, lost tokens, and the
+  env/db two-source model.
 - **Git workflow:** [`docs/git-workflow.md`](./docs/git-workflow.md) —
   branch protection, conversation-resolution gating, the
   `enforce_admins` escape hatch.

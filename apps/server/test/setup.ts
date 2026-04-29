@@ -30,7 +30,8 @@ import { tokenAuth } from '../src/auth/middleware.ts';
 import type { ActorEntry } from '../src/auth/registry.ts';
 import { closeDb, db } from '../src/db/client.ts';
 import type { Db } from '../src/db/client.ts';
-import { actors, projects } from '../src/db/schema.ts';
+import { projects } from '../src/db/schema.ts';
+import { seedFromEnv } from '../src/db/seed.ts';
 import { buildHttpRoutes } from '../src/adapters/http/routes.ts';
 import { sseHandler } from '../src/adapters/http/sse.ts';
 import { buildMcpRoutes } from '../src/adapters/mcp/server.ts';
@@ -69,17 +70,17 @@ export function buildTestApp(): Hono<Env> {
 }
 
 export async function resetDb(): Promise<void> {
+  // actor_tokens MUST come before actors in the truncate list — even with
+  // CASCADE, listing both is defensive against future FKs.
   await db.execute(
-    sql`TRUNCATE TABLE events, operations, tasks, projects, actors RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE events, operations, tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
   );
 
-  await db.insert(actors).values({
-    id: FIXTURE_ACTOR_ID,
-    kind: 'human',
-    displayName: 'Leonardo',
-    agentRuntime: null,
-    parentActorId: null,
-  });
+  // Re-import env actors (FIXTURE_ACTOR_ID + agent) into actors +
+  // actor_tokens with source='env'. This replaces the bespoke INSERT
+  // we used in v0.0.8 — there's now exactly one path that knows how
+  // to import env credentials, and it lives in db/seed.ts.
+  await seedFromEnv(db);
 
   await db.insert(projects).values({
     id: FIXTURE_PROJECT_ID,

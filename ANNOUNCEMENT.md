@@ -12,8 +12,17 @@ That's what Sprino is. And the protocol it speaks — Tessera — is its own thi
 
 ## What Sprino does today
 
-Concretely, after the v0.0.7 self-host bundle:
+Concretely, after the v0.0.9 actor-lifecycle release:
 
+- **In-app member management.** A Members tab in the web UI invites
+  humans, rotates tokens, and revokes them — no `.env` edits, no
+  restart. New plaintext is shown once, then only the SHA-256 hash
+  lives in the database.
+- **Two-source actor model.** Actors carry a `source` of `env` or `db`.
+  Env actors are reconciled from `SPRINO_ACTORS_JSON` on every boot,
+  giving you a guaranteed break-glass recovery path even if the
+  database has been tampered with. Db actors are managed entirely at
+  runtime through the UI or the `actor.register` Tessera verb.
 - **One Hono process, two adapters.** `/api/*` for humans (and the React UI), `/mcp/*` for agents. Same service layer underneath. Idempotency, version checks, and event-log writes happen exactly once, in `service/`, never duplicated across adapters.
 - **Append-only event log.** Every state change is an event. Projections (tasks, agents, agent_context) are derived. Same Drizzle transaction wraps event-write + projection-update — so you can't have a state change without a corresponding event, ever.
 - **Multi-actor auth.** Bearer tokens, with each actor declared as either `human` or `agent`. Agents get a runtime tag (`claude-code`, `gpt-5`, whatever) and a parent actor. The activity feed shows who did what — not just "the user" or "the API."
@@ -35,7 +44,7 @@ This is the same pattern as ActivityPub + Mastodon, or LSP + every editor that s
 I'd rather tell you up-front than have you find out three weeks in:
 
 - **Single-tenant only.** One Sprino deploy = one team. No multi-org isolation yet. Multi-tenant is the v0.2 headline feature.
-- **Token rotation needs a server restart.** Hot reload of the actor registry is on the list, not in the build.
+- **Token rotation needs a server restart.** Hot reload of the actor registry is on the list, not in the build. *(Fixed in v0.0.9 for db-source actors — the Members tab rotates without restarting. Env-source actors still require a restart by design, as the recovery path.)*
 - **No comments, no DnD, no inline editing.** The web UI is a thin viewer. Correctness lives at the protocol layer.
 - **No hosted SaaS.** I'll self-host for you if you ask nicely, but there's no signup form. v0.2 is when cloud becomes a real plan.
 - **Performance is unmeasured at scale.** Tested fine for tens of agents and hundreds of events. Haven't pushed past that.

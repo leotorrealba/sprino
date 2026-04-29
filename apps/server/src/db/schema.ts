@@ -55,10 +55,43 @@ export const actors = pgTable('actors', {
   displayName: text('display_name').notNull(),
   agentRuntime: text('agent_runtime'),
   parentActorId: uuid('parent_actor_id'),
+  // 'env' = imported from SPRINO_ACTORS_JSON at boot; 'db' = minted via
+  // actor.register. env actors are immutable from the API — recover by
+  // editing .env and restarting.
+  source: text('source').notNull().default('db'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * Bearer credentials. Stored as sha256(plaintext) — plaintext is returned
+ * exactly once on actor.register / rotate_token and never recoverable.
+ *
+ * Lifecycle: rows are never deleted. Revoke flips revoked_at so the audit
+ * trail of "who held which credential when" survives. Auth queries this
+ * table via the partial unique index on (actor_id) WHERE revoked_at IS
+ * NULL, which also enforces "at most one active credential per actor"
+ * across concurrent rotate_token calls.
+ */
+export const actorTokens = pgTable(
+  'actor_tokens',
+  {
+    id: uuid('id').primaryKey(),
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => actors.id),
+    tokenHash: text('token_hash').notNull().unique(),
+    source: text('source').notNull().default('db'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => ({
+    actorIdx: index('actor_tokens_actor_idx').on(t.actorId),
+  }),
+);
 
 export const projects = pgTable(
   'projects',
@@ -177,6 +210,8 @@ export const operations = pgTable(
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
+export type ActorTokenRow = typeof actorTokens.$inferSelect;
+export type NewActorTokenRow = typeof actorTokens.$inferInsert;
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 export type TaskRow = typeof tasks.$inferSelect;

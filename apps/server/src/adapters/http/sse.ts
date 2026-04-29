@@ -58,7 +58,12 @@ export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
     }
     throw err;
   }
-  if (!lookupActorById(actorId)) {
+  const db = c.get('db');
+
+  // Verify the ticket-bound actor still exists. Hits the DB so actors
+  // minted via actor.register at runtime can stream events too — no env
+  // reload required.
+  if (!(await lookupActorById(db, actorId))) {
     return c.json({ error: 'unknown_actor' }, 403);
   }
 
@@ -69,8 +74,6 @@ export async function sseHandler(c: Context<StreamEnv>): Promise<Response> {
   c.header('Cache-Control', 'no-cache, no-store, no-transform');
   c.header('Connection', 'keep-alive');
   c.header('X-Accel-Buffering', 'no');
-
-  const db = c.get('db');
 
   return streamSSE(c, async (stream) => {
     let cursor: string | null = lastEventId;

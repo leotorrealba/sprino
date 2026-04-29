@@ -137,6 +137,26 @@ Honest list:
   don't care; some companies do. If you fall in the second bucket,
   email us about a commercial license.
 
+## What changed in v0.0.9
+
+Two things, both about *who can use Sprino*:
+
+**1. You can invite people from inside the app now.** Before v0.0.9,
+adding a teammate or an agent meant editing `SPRINO_ACTORS_JSON` in
+`.env` and restarting the server. As of v0.0.9 there's a Members tab:
+type a name, hit "register," hand the new bearer token to your
+teammate. Tokens can be rotated and revoked from the same screen with
+no downtime. The plaintext token is shown exactly once — copy it then,
+or rotate again.
+
+**2. You can always recover access, even if everything goes wrong.**
+Every actor is tagged with a `source`: either `env` (declared in
+`.env`) or `db` (created in-app). On every server boot, Sprino reads
+`SPRINO_ACTORS_JSON` and re-imports those actors — re-activating their
+tokens even if someone tampered with the database. So the env file
+remains your floor: as long as you can edit it and restart, you can
+get back in. `docs/TOKEN-RECOVERY.md` is the playbook.
+
 ## Where to go from here
 
 - **You want to try it:** [README](../README.md) → "Self-host (30 minutes,
