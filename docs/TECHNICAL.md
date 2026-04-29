@@ -337,15 +337,19 @@ registry at request time. Env actors are imported into the database on
 boot by `seedFromEnv()` (`apps/server/src/db/seed.ts`), which:
 
 1. Inserts any new env actors with `source='env'`.
-2. Upserts each env token with `source='env'`, **un-revoking** it if
-   the row already exists (defends against malicious DB writes).
+2. Inserts each env token row if no row with that hash exists yet. If a
+   row with the same `token_hash` is already present and **active**, no
+   change is made (idempotent restart). If it is present and **revoked**,
+   `seedFromEnv()` rejects with a hard error: re-introducing a
+   previously-revoked credential is treated as a security smell, and the
+   error message tells the operator to mint a fresh token instead.
 3. Never deletes — actors removed from the env stay in the database
    for audit history but have no active token.
 
 **Race-safe rotate.** `actor_tokens` carries a partial unique index:
 
 ```sql
-CREATE UNIQUE INDEX actor_tokens_one_active
+CREATE UNIQUE INDEX actor_tokens_active_actor_idx
   ON actor_tokens (actor_id) WHERE revoked_at IS NULL;
 ```
 
