@@ -1,8 +1,8 @@
 -- 0005_agent_lifecycle.sql
 --
--- Agent lifecycle storage for Tessera v0.1.3 support. Transition rules stay
--- in the service layer; this migration only adds the persistent primitives
--- future heartbeat/deactivate behavior needs.
+-- Agent lifecycle storage for B2 internal lifecycle support. Transition
+-- rules stay in the service layer; this migration only adds the persistent
+-- primitives future heartbeat/deactivate behavior needs.
 --
 -- Compatibility:
 -- - Additive only: no existing API payloads change in this packet.

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sprino — reference implementation of Tessera
 /**
- * B2-P1 agent lifecycle storage primitives.
+ * B2 agent lifecycle storage and transition primitives.
  *
- * Storage only: transition rules land in B2-P2. These tests pin the
- * additive database contract that heartbeat/deactivate will build on.
+ * These tests pin both the additive database contract for lifecycle
+ * persistence and the internal heartbeat/deactivate transition behavior
+ * built on top of it.
  */
 
 import { eq, sql } from 'drizzle-orm';
@@ -143,7 +144,7 @@ describe('agent lifecycle storage primitives', () => {
         'Default Active Agent',
         'db',
         'claude-code',
-        '018c3e7a-0001-7000-8000-000000000001'
+        ${FIXTURE_ACTOR_ID}
       )
       returning id, lifecycle_state, last_heartbeat_at, deactivated_at
     `);
