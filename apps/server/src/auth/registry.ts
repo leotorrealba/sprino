@@ -82,8 +82,10 @@ export function hashToken(token: string): string {
  *
  * Returns [] when the env var is unset — at v0.0.9 a deployment can run
  * with zero env actors and mint humans via actor.register at runtime.
- * Boot fails later (in seed) only if zero active credentials exist
- * AFTER the import.
+ * Note that the seed step does not enforce "at least one active
+ * credential post-import"; with zero env actors and an empty database,
+ * boot succeeds but the deployment will have no way to authenticate
+ * until a token is provisioned out-of-band.
  */
 export function parseActorsEnv(raw: string | undefined): ActorEnvEntry[] {
   if (!raw) return [];
