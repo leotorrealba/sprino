@@ -1,131 +1,151 @@
-# Git Workflow — leotorrealba/sprino
+# Git Workflow
 
-This document describes the standardized git workflow, branch protection rules, and CI checks that apply to this repository.
+Operating manual for `leotorrealba/sprino`.
 
-## Overview
+The promise: **`main` is always releasable.** Everything below exists to keep that promise honest without turning normal work into theater.
 
-**Main branch:** `main`
+## Phase: Solo vs. Collaborator
 
-**Required checks before merge:**
-- `pr-title` — PR titles must follow Conventional Commits (e.g., `feat(api):`, `fix:`, `docs:`, `chore:`)
-- `ts-typecheck` — TypeScript type checking (all workspaces)
-- `ts-test` — TypeScript tests (@sprino/server with isolated test database)
+This repo starts in **solo phase**: one committer, no required reviewers.
+The rules below are tuned for that. There is a one-time checklist at the
+bottom ("Flip on collaborator mode") that turns on stricter rules when a second committer joins.
 
-**Branch protection rules on `main`:**
-- Require pull request review: disabled
-- Dismiss stale PR approvals: N/A
-- Require status checks to pass: required (all checks above)
-- Require branches to be up to date before merging: required (strict mode)
-- Require conversation resolution before merging: required
-- Require linear history: required
-- Require signed commits: disabled
-- Allow force pushes: disabled
-- Allow deletions: disabled
+## Branching Strategy
 
-## Workflow
+Trunk-based development. One long-lived branch (`main`), short-lived branches
+for everything else, releases are tags on `main`.
 
-1. **Create a feature branch off `main`:**
-   ```bash
-   git checkout main
-   git pull
-   git checkout -b feat/description-of-feature
-   ```
+- `main` is the protected source of truth and is always releasable.
+- Every change lands through a pull request. No direct commits.
+- Feature branches live for hours or days, not weeks.
+- Delete branches after merge.
+- Releases are git tags (`vX.Y.Z`).
 
-2. **Make commits with clear, atomic changes:**
-   ```bash
-   git commit -m "feat(scope): short description
-   
-   Longer explanation if needed. Wrap at 72 chars."
-   ```
-   **Commit message format:** Start with a Conventional Commit type:
-   - `feat:` — new feature
-   - `fix:` — bug fix
-   - `docs:` — documentation only
-   - `chore:` — build, deps, config, no code change
-   - `refactor:` — code restructure, no new feature
-   - `perf:` — performance optimization
-   - `test:` — test changes only
-   - `security:` — security fix
-   - `release:` — version bump
+### Branch Format
 
-3. **Push your branch and create a pull request:**
-   ```bash
-   git push -u origin feat/description-of-feature
-   gh pr create --draft # or open GitHub web UI
-   ```
-
-4. **Address PR feedback:**
-   ```bash
-   # Make changes in response to review
-   git add .
-   git commit -m "fix: address feedback on X"
-   git push
-   # Do NOT force-push to main; do NOT amend published commits
-   ```
-
-5. **Merge once CI passes and conflicts are resolved:**
-   ```bash
-   # GitHub web UI: "Squash and merge"
-   # OR command line: git will reject force-push and direct push to main
-   ```
-   - Squash merges are used (all commits on the branch → one commit on main)
-   - Head branches are auto-deleted after merge
-   - Linear history is enforced (no merge commits)
-
-## CI Checks
-
-### `pr-title` — Conventional Commits validation
-Ensures PR titles are structured (e.g., `feat:`, `fix: (scope):`) so the merge commit message is useful.
-
-### `ts-typecheck` — TypeScript type checking
-Runs `bun typecheck` across all workspaces. Must pass before merge.
-
-**To fix locally:**
-```bash
-bun typecheck
-# or fix files and re-run
+```text
+<type>/<domain>/<short-description>
 ```
 
-### `ts-test` — Server tests
-Runs `bun test` in @sprino/server against an isolated test database. Must pass before merge.
+### Branch Types
 
-**To fix locally:**
+- `feat` — adds user-facing capability.
+- `fix` — corrects broken behavior.
+- `test` — adds or repairs test coverage.
+- `docs` — documentation only.
+- `chore` — maintenance and tooling.
+- `refactor` — structure-only changes.
+- `perf` — speed or resource improvements.
+- `security` — trust-boundary or secret handling fixes.
+- `release` — version bump + release notes.
+
+## Pull Request Rules
+
+Every PR answers four questions:
+
+- What changed?
+- Why does this matter?
+- How was it tested?
+- What risk remains?
+
+### Responding to review comments
+
+We do **not** auto-commit fixes for review comments. The Copilot SWE coding
+agent (distinct from the `copilot-pull-request-reviewer` comment bot) should be disabled at:
+
+`https://github.com/leotorrealba/sprino/settings/copilot/coding_agent`
+
+Use `/pr-respond` to process unresolved review threads one by one.
+For each thread: **Apply**, **Challenge**, **Modify**, or **Defer**.
+Branch protection should block merge until unresolved threads are handled.
+
+### Solo-Phase Review Rules
+
+While there is one committer:
+
+- Open a PR for every change.
+- CI must be green before merge.
+- Self-merge after CI passes.
+- Squash merge only.
+
+## Required Status Checks
+
+Required checks for this repo:
+
+- `pr-title`
+- `ts-typecheck`
+- `ts-test`
+
+## Local Setup (one time)
+
 ```bash
-# Requires local test DB
-createdb sprino_test 2>/dev/null || true
-TEST_DATABASE_URL=postgres://$(whoami)@localhost:5432/sprino_test bun test
+git config pull.rebase true
+git config merge.ff only
+git config rebase.autoStash true
 ```
 
-**Skip tests:** Not allowed. Tests are required on every PR. If a test is flaky or broken, fix it in the PR.
+## Main Branch Protection
 
-## Troubleshooting
+Apply/refresh protection:
 
-### "Can't push to main / branch protection prevented push"
-This is intentional. All changes must go through a PR.
-
-### "Merge button is disabled"
-Check the PR page; it shows which checks are failing. Click "Details" on a failed check to see the error.
-
-### "Your branch has diverged from upstream"
-You (or someone else) force-pushed to your feature branch. Don't do that; create a new branch if needed. Direct pushes to `main` are blocked.
-
-### "Merge conflicts"
-Resolve locally, commit (do not amend), and push:
 ```bash
-git merge main
-# resolve conflicts in your editor
-git add .
-git commit  # no -m, just describe the conflict resolution
-git push
+gh api --method PUT \
+  repos/leotorrealba/sprino/branches/main/protection \
+  --field required_status_checks='{"strict":true,"contexts":["pr-title","ts-typecheck","ts-test"]}' \
+  --field enforce_admins=true \
+  --field required_pull_request_reviews=null \
+  --field restrictions=null \
+  --field required_conversation_resolution=true \
+  --field allow_force_pushes=false \
+  --field allow_deletions=false \
+  --field required_linear_history=true
 ```
 
-## Seeing Your Changes
+What this enables:
 
-After your PR is merged to `main`:
-- The code is live in the `main` branch
-- CI runs on every push to `main` (for monitoring)
-- Deployment is handled separately (see README)
+- PR required (no direct push).
+- Linear history (squash-merge only).
+- Conversation resolution required.
+- No force-push, no branch deletion.
+- `enforce_admins=true`.
 
-## Questions?
+### Stuck-PR escape hatch
 
-See the main [README](../README.md) for project structure. For CI-specific questions, check the workflow file at `.github/workflows/pr.yml`.
+Use only for real incidents:
+
+```bash
+set -euo pipefail
+trap 'gh api -X POST repos/leotorrealba/sprino/branches/main/protection/enforce_admins' EXIT
+gh api -X DELETE repos/leotorrealba/sprino/branches/main/protection/enforce_admins
+gh pr merge <N> --squash --delete-branch --admin
+```
+
+### Flip on collaborator mode
+
+The day a second committer is added, run this once:
+
+```bash
+gh api --method PUT \
+  repos/leotorrealba/sprino/branches/main/protection \
+  --field required_status_checks='{"strict":true,"contexts":["pr-title","ts-typecheck","ts-test"]}' \
+  --field enforce_admins=true \
+  --field required_pull_request_reviews='{"required_approving_review_count":1,"dismiss_stale_reviews":true,"require_code_owner_reviews":false,"require_last_push_approval":true}' \
+  --field restrictions=null \
+  --field required_conversation_resolution=true \
+  --field allow_force_pushes=false \
+  --field allow_deletions=false \
+  --field required_linear_history=true
+```
+
+## Emergency Override
+
+If admin bypass is used:
+
+1. Document why.
+2. Open a follow-up PR with regression test/doc fix.
+3. Restore protections if temporarily relaxed.
+4. Treat it as an incident.
+
+---
+
+*Last reviewed: 2026-04-29. Re-review when collaboration model changes.*
