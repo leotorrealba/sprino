@@ -122,6 +122,12 @@ Tessera defines five core resources. Sprino's Drizzle schema
 | `events` | Append-only authoritative log. **Source of truth.** |
 | `operations` | Idempotency dedup records (UUIDv7, 30-day retention). |
 
+The `actors` table also carries Sprino-internal lifecycle storage for AI
+agents: `lifecycle_state` (`active` / `inactive`),
+`last_heartbeat_at`, and `deactivated_at`. These columns support agent
+liveness bookkeeping and future expiry policies, but they are deliberately
+not part of the Tessera `Actor`, `Agent`, `Task`, or event response shapes.
+
 ### Event sourcing
 
 - Every mutating operation writes an event row **before** updating the
@@ -406,6 +412,42 @@ actors are rejected by both verbs with `400 operation_unsupported`
 (error class `EnvActorImmutableError`) — operators rotate them by
 editing `.env` and restarting, which is the documented break-glass
 path (`docs/TOKEN-RECOVERY.md`).
+
+---
+
+## 10c. Agent lifecycle persistence (B2)
+
+B2 adds storage and an internal service primitive for agent runtime
+liveness without changing the external Tessera contract.
+
+**Storage contract.** Migration `0005_agent_lifecycle.sql` creates
+`actor_lifecycle_state` with `active` and `inactive`, then adds three
+columns to `actors`:
+
+- `lifecycle_state`: non-null, default `active`.
+- `last_heartbeat_at`: nullable until the first successful heartbeat.
+- `deactivated_at`: nullable until the first deactivate transition.
+
+The migration also adds `actors_lifecycle_state_idx` and
+`actors_agent_liveness_idx` so future liveness scans can filter by
+actor kind, lifecycle state, and heartbeat timestamp without table scans.
+
+**Transition boundary.** `transitionAgentLifecycle()` in
+`apps/server/src/service/actors.ts` is the only B2 transition primitive.
+It row-locks the target actor, rejects transitions for humans, records
+heartbeats only while an agent is active, and treats repeated deactivate
+calls as idempotent. Adapters do not call this yet; when heartbeat or
+deactivate verbs become public, adapters should stay thin and delegate to
+this service boundary.
+
+**Wire contract.** Lifecycle fields remain internal. `actor.get`,
+`actor.list`, Sprino's `/api/agents`, task responses, event responses,
+and MCP actor structured content continue to expose the same external
+shapes as before B2. The conformance regression in
+`apps/server/test/conformance.test.ts` first writes heartbeat/deactivate
+state through the internal primitive, then checks HTTP actor/agent/task/event
+responses and MCP actor responses for absence of `lifecycle_state`,
+`last_heartbeat_at`, and `deactivated_at` (including camelCase variants).
 
 ---
 

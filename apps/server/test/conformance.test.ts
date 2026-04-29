@@ -21,8 +21,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
 import { projects } from '../src/db/schema.ts';
+import { transitionAgentLifecycle } from '../src/service/actors.ts';
 import {
   FIXTURE_ACTOR_ID,
+  FIXTURE_AGENT_ID,
   FIXTURE_AGENT_TOKEN,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
@@ -43,6 +45,14 @@ const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SECOND_PROJECT_ID = '018c3e7a-0002-7000-8000-000000000002';
 const SECOND_PROJECT_REPO = '/Users/leotorrealba/Development/tessera';
+const INTERNAL_AGENT_LIFECYCLE_FIELDS = [
+  'lifecycle_state',
+  'lifecycleState',
+  'last_heartbeat_at',
+  'lastHeartbeatAt',
+  'deactivated_at',
+  'deactivatedAt',
+];
 
 function bearer(body: unknown, method = 'POST'): RequestInit {
   return {
@@ -68,6 +78,12 @@ function bearerForToken(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   };
+}
+
+function expectNoAgentLifecycleFields(record: Record<string, unknown>): void {
+  for (const field of INTERNAL_AGENT_LIFECYCLE_FIELDS) {
+    expect(record).not.toHaveProperty(field);
+  }
 }
 
 describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
@@ -1008,5 +1024,185 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
       ),
     );
     expect(agentRegister.status).toBe(403);
+  });
+
+  it('keeps internal agent lifecycle storage out of external actor and task contracts', async () => {
+    const app = buildTestApp();
+
+    await transitionAgentLifecycle(db, {
+      actorId: FIXTURE_AGENT_ID,
+      transition: 'heartbeat',
+      now: new Date('2026-04-29T10:00:00.000Z'),
+    });
+
+    const createResp = await app.fetch(
+      new Request(
+        'http://test/api/tasks',
+        bearerForToken(FIXTURE_AGENT_TOKEN, {
+          operation_id: '018c3e7a-b203-7000-8000-000000000001',
+          project_id: FIXTURE_PROJECT_ID,
+          title: 'Verify lifecycle persistence stays internal',
+        }),
+      ),
+    );
+    expect(createResp.status).toBe(201);
+    const createJson = (await createResp.json()) as {
+      task: Record<string, unknown>;
+      event: Record<string, unknown>;
+    };
+    expect(createJson.task.created_by).toBe(FIXTURE_AGENT_ID);
+    expectNoAgentLifecycleFields(createJson.task);
+    expectNoAgentLifecycleFields(createJson.event);
+
+    const taskId = createJson.task.id as string;
+    const getTaskResp = await app.fetch(
+      new Request(`http://test/api/tasks/${taskId}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(getTaskResp.status).toBe(200);
+    const getTaskJson = (await getTaskResp.json()) as {
+      task: Record<string, unknown>;
+      agent_context: { recent_events: Array<Record<string, unknown>> };
+    };
+    expectNoAgentLifecycleFields(getTaskJson.task);
+    for (const event of getTaskJson.agent_context.recent_events) {
+      expectNoAgentLifecycleFields(event);
+    }
+
+    const eventListResp = await app.fetch(
+      new Request(
+        `http://test/api/events?project_id=${FIXTURE_PROJECT_ID}`,
+        {
+          headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+        },
+      ),
+    );
+    expect(eventListResp.status).toBe(200);
+    const eventListJson = (await eventListResp.json()) as {
+      events: Array<{
+        actor: Record<string, unknown>;
+        task: Record<string, unknown>;
+      }>;
+    };
+    const createdEvent = eventListJson.events.find(
+      (event) => event.task.id === taskId,
+    );
+    expect(createdEvent).toBeDefined();
+    expect(createdEvent!.actor.id).toBe(FIXTURE_AGENT_ID);
+    expectNoAgentLifecycleFields(createdEvent!.actor);
+    expectNoAgentLifecycleFields(createdEvent!.task);
+
+    await transitionAgentLifecycle(db, {
+      actorId: FIXTURE_AGENT_ID,
+      transition: 'deactivate',
+      now: new Date('2026-04-29T10:05:00.000Z'),
+    });
+
+    const getActorResp = await app.fetch(
+      new Request(`http://test/api/actors/${FIXTURE_AGENT_ID}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(getActorResp.status).toBe(200);
+    const getActorJson = (await getActorResp.json()) as {
+      actor: Record<string, unknown>;
+    };
+    expectNoAgentLifecycleFields(getActorJson.actor);
+
+    const listActorsResp = await app.fetch(
+      new Request('http://test/api/actors?kind=agent', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(listActorsResp.status).toBe(200);
+    const listActorsJson = (await listActorsResp.json()) as {
+      actors: Array<Record<string, unknown>>;
+    };
+    const listedActor = listActorsJson.actors.find(
+      (actor) => actor.id === FIXTURE_AGENT_ID,
+    );
+    expect(listedActor).toBeDefined();
+    expectNoAgentLifecycleFields(listedActor!);
+
+    const listAgentsResp = await app.fetch(
+      new Request('http://test/api/agents', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(listAgentsResp.status).toBe(200);
+    const listAgentsJson = (await listAgentsResp.json()) as {
+      agents: Array<Record<string, unknown>>;
+    };
+    const listedAgent = listAgentsJson.agents.find(
+      (agent) => agent.id === FIXTURE_AGENT_ID,
+    );
+    expect(listedAgent).toBeDefined();
+    expectNoAgentLifecycleFields(listedAgent!);
+
+    const mcpGetActor = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 200,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.get',
+            arguments: { actor_id: FIXTURE_AGENT_ID },
+          },
+        }),
+      ),
+    );
+    expect(mcpGetActor.status).toBe(200);
+    const mcpGetActorJson = (await mcpGetActor.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: { actor: Record<string, unknown> };
+      };
+    };
+    expectNoAgentLifecycleFields(
+      mcpGetActorJson.result.structuredContent.actor,
+    );
+    const mcpGetActorText = JSON.parse(
+      mcpGetActorJson.result.content[0]!.text,
+    ) as { actor: Record<string, unknown> };
+    expectNoAgentLifecycleFields(mcpGetActorText.actor);
+
+    const mcpListActors = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 201,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.list',
+            arguments: { kind: 'agent' },
+          },
+        }),
+      ),
+    );
+    expect(mcpListActors.status).toBe(200);
+    const mcpListActorsJson = (await mcpListActors.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: { actors: Array<Record<string, unknown>> };
+      };
+    };
+    const mcpActor =
+      mcpListActorsJson.result.structuredContent.actors.find(
+        (actor) => actor.id === FIXTURE_AGENT_ID,
+    );
+    expect(mcpActor).toBeDefined();
+    expectNoAgentLifecycleFields(mcpActor!);
+    const mcpListActorsText = JSON.parse(
+      mcpListActorsJson.result.content[0]!.text,
+    ) as { actors: Array<Record<string, unknown>> };
+    const mcpTextActor = mcpListActorsText.actors.find(
+      (actor) => actor.id === FIXTURE_AGENT_ID,
+    );
+    expect(mcpTextActor).toBeDefined();
+    expectNoAgentLifecycleFields(mcpTextActor!);
   });
 });

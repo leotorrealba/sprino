@@ -10,9 +10,15 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Internal actor roles (`admin` / `member`) are now persisted on `actors`,
   hydrated through auth middleware, and enforced for actor-admin verbs in
   both HTTP and MCP transports.
+- Internal agent lifecycle persistence now stores `lifecycle_state`,
+  `last_heartbeat_at`, and `deactivated_at` on `actors`, with service-layer
+  `heartbeat` / `deactivate` transitions for agent liveness bookkeeping.
 - Added dedicated regression coverage for actor-admin authorization, the
   last-admin concurrent revoke race, project seed slug collisions, and SSE
   credential revocation behavior.
+- Added conformance regression coverage proving B2 agent lifecycle storage
+  stays internal across HTTP actor/agent/task/event response shapes and MCP
+  actor response shapes.
 
 ### Changed
 - `actor.register`, `actor.revoke_token`, and Sprino-only
@@ -24,6 +30,9 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Project seeding in `db:migrate` now merges deterministically by existing
   project identity (`id` or `slug`) so repeated runs do not fail when an
   incoming seed changes project ids.
+- Agent lifecycle transitions are centralized in `service/actors.ts`; future
+  adapters should delegate there instead of duplicating heartbeat or
+  deactivate business logic at the transport edge.
 
 ### Fixed
 - Revoking an actor credential now invalidates stale SSE tickets and

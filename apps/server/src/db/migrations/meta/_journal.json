@@ -36,6 +36,13 @@
       "when": 1777536000000,
       "tag": "0004_actor_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777622400000,
+      "tag": "0005_agent_lifecycle",
+      "breakpoints": true
     }
   ]
 }
