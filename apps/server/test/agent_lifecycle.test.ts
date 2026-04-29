@@ -24,6 +24,9 @@ import {
 } from '../src/service/actors.ts';
 import { FIXTURE_ACTOR_ID } from './setup.ts';
 
+const AGENT_REGISTER_FIELDS_REQUIRED =
+  'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
+
 async function seedAgent(args: {
   lifecycleState?: 'active' | 'inactive';
   lastHeartbeatAt?: Date | null;
@@ -85,7 +88,7 @@ describe('agent register request validation', () => {
     expect(ActorRegisterReqSchema.parse(req)).toEqual(req);
   });
 
-  it('requires agent_runtime for agent actor.register requests', () => {
+  it('requires both agent fields when agent_runtime is missing', () => {
     const req = {
       operation_id: '018c3e7a-0005-7000-8000-000000000031',
       display_name: 'Claude Code (session)',
@@ -99,12 +102,12 @@ describe('agent register request validation', () => {
     if (!result.success) {
       expect(result.error.issues[0]).toMatchObject({
         path: ['agent_runtime'],
-        message: 'Required field is missing.',
+        message: AGENT_REGISTER_FIELDS_REQUIRED,
       });
     }
   });
 
-  it('requires parent_actor_id for agent actor.register requests', () => {
+  it('requires both agent fields when parent_actor_id is missing', () => {
     const req = {
       operation_id: '018c3e7a-0005-7000-8000-000000000032',
       display_name: 'Claude Code (session)',
@@ -117,8 +120,8 @@ describe('agent register request validation', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0]).toMatchObject({
-        path: ['parent_actor_id'],
-        message: 'Required field is missing.',
+        path: ['agent_runtime'],
+        message: AGENT_REGISTER_FIELDS_REQUIRED,
       });
     }
   });
@@ -138,6 +141,26 @@ describe('agent register request validation', () => {
     if (!result.success) {
       expect(result.error.issues[0]).toMatchObject({
         path: ['parent_actor_id'],
+      });
+    }
+  });
+
+  it('normalizes non-string parent_actor_id validation errors', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000034',
+      display_name: 'Claude Code (session)',
+      kind: 'agent',
+      agent_runtime: 'claude-code',
+      parent_actor_id: 42,
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['parent_actor_id'],
+        message: 'Must be a string.',
       });
     }
   });

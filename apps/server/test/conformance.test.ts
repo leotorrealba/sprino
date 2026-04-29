@@ -817,15 +817,23 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
 
   it('rejects agent register requests missing required agent fields', async () => {
     const app = buildTestApp();
-    const req = {
-      operation_id: '018c3e7a-0005-7000-8000-000000000011',
-      display_name: 'Claude Code (session)',
-      kind: 'agent',
+    const req = readFixture(
+      'actor-register-invalid-kind.req.json',
+    ) as Record<string, unknown>;
+    const expected = readFixture(
+      'actor-register-invalid-kind.res.json',
+    ) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
     };
+
     const r = await app.fetch(
       new Request('http://test/api/actors', bearer(req)),
     );
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(expected._error.status);
     const body = (await r.json()) as {
       _error: {
         status: number;
@@ -833,10 +841,10 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
         details: { field: string; reason: string };
       };
     };
-    expect(body._error.status).toBe(400);
-    expect(body._error.code).toBe('validation_error');
-    expect(body._error.details.field).toBe('agent_runtime');
-    expect(body._error.details.reason).toBe('Required field is missing.');
+    expect(body._error.status).toBe(expected._error.status);
+    expect(body._error.code).toBe(expected._error.code);
+    expect(body._error.details.field).toBe(expected._error.details.field);
+    expect(body._error.details.reason).toBe(expected._error.details.reason);
   });
 
   it('accepts complete agent register request validation before the temporary service guard rejects it', async () => {

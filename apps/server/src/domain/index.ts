@@ -279,30 +279,69 @@ const ActorRegisterBaseReqShape = z.object({
     .max(200),
 });
 
-const HumanActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
-  kind: z.literal('human'),
-}).strict();
+const AGENT_REGISTER_FIELDS_REQUIRED =
+  'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
 
-const AgentActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
-  kind: z.literal('agent'),
+export type ActorRegisterReq =
+  | {
+      operation_id: string;
+      display_name: string;
+      kind: 'human';
+    }
+  | {
+      operation_id: string;
+      display_name: string;
+      kind: 'agent';
+      agent_runtime: string;
+      parent_actor_id: string;
+    };
+
+export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
+  kind: z.enum(['human', 'agent']),
   agent_runtime: z
     .string({
-      required_error: 'Required field is missing.',
       invalid_type_error: 'Must be a string.',
     })
-    .min(1, { message: 'Required field is missing.' }),
+    .min(1, { message: 'Required field is missing.' })
+    .optional(),
   parent_actor_id: z
     .string({
-      required_error: 'Required field is missing.',
+      invalid_type_error: 'Must be a string.',
     })
-    .uuid(),
-}).strict();
+    .uuid()
+    .optional(),
+})
+  .strict()
+  .superRefine((req, ctx) => {
+    if (
+      req.kind === 'agent' &&
+      (req.agent_runtime === undefined ||
+        req.parent_actor_id === undefined)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: AGENT_REGISTER_FIELDS_REQUIRED,
+      });
+    }
+  })
+  .transform((req): ActorRegisterReq => {
+    if (req.kind === 'human') {
+      return {
+        operation_id: req.operation_id,
+        display_name: req.display_name,
+        kind: req.kind,
+      };
+    }
 
-export const ActorRegisterReqSchema = z.discriminatedUnion('kind', [
-  HumanActorRegisterReqSchema,
-  AgentActorRegisterReqSchema,
-]);
-export type ActorRegisterReq = z.infer<typeof ActorRegisterReqSchema>;
+    return {
+      operation_id: req.operation_id,
+      display_name: req.display_name,
+      kind: req.kind,
+      agent_runtime: req.agent_runtime as string,
+      parent_actor_id: req.parent_actor_id as string,
+    };
+  });
 
 export const ActorListReqSchema = z
   .object({
