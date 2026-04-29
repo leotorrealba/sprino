@@ -26,6 +26,8 @@ import { FIXTURE_ACTOR_ID } from './setup.ts';
 
 const AGENT_REGISTER_FIELDS_REQUIRED =
   'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
+const ACTOR_KIND_UNSUPPORTED =
+  'Only `human` or `agent` is accepted.';
 
 async function seedAgent(args: {
   lifecycleState?: 'active' | 'inactive';
@@ -74,6 +76,41 @@ describe('agent register request validation', () => {
     };
 
     expect(ActorRegisterReqSchema.parse(req)).toEqual(req);
+  });
+
+  it('preserves missing-kind validation for actor.register requests', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000011',
+      display_name: 'Ada Lovelace',
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['kind'],
+        message: 'Required field is missing.',
+      });
+    }
+  });
+
+  it('uses a custom kind validation error for unsupported actor.register kinds', () => {
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000013',
+      display_name: 'Ada Lovelace',
+      kind: 'robot',
+    };
+
+    const result = ActorRegisterReqSchema.safeParse(req);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]).toMatchObject({
+        path: ['kind'],
+        message: ACTOR_KIND_UNSUPPORTED,
+      });
+    }
   });
 
   it('rejects human actor.register requests with agent-only fields', () => {

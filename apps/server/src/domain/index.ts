@@ -283,6 +283,8 @@ const AGENT_REGISTER_FIELDS_REQUIRED =
   'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
 const HUMAN_REGISTER_AGENT_FIELDS_REJECTED =
   'Agent-only fields are not accepted for human registration.';
+const ACTOR_KIND_UNSUPPORTED =
+  'Only `human` or `agent` is accepted.';
 
 export type ActorRegisterReq =
   | {
@@ -299,7 +301,13 @@ export type ActorRegisterReq =
     };
 
 export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
-  kind: z.enum(['human', 'agent']),
+  kind: z
+    .string({
+      required_error: 'Required field is missing.',
+    })
+    .refine((kind) => kind === 'human' || kind === 'agent', {
+      message: ACTOR_KIND_UNSUPPORTED,
+    }),
   agent_runtime: z
     .string({
       invalid_type_error: 'Must be a string.',
