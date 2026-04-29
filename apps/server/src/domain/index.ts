@@ -281,6 +281,8 @@ const ActorRegisterBaseReqShape = z.object({
 
 const AGENT_REGISTER_FIELDS_REQUIRED =
   'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
+const HUMAN_REGISTER_AGENT_FIELDS_REJECTED =
+  'Agent-only fields are not accepted for human registration.';
 
 export type ActorRegisterReq =
   | {
@@ -313,6 +315,18 @@ export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
 })
   .strict()
   .superRefine((req, ctx) => {
+    if (
+      req.kind === 'human' &&
+      (req.agent_runtime !== undefined ||
+        req.parent_actor_id !== undefined)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: HUMAN_REGISTER_AGENT_FIELDS_REJECTED,
+      });
+    }
+
     if (
       req.kind === 'agent' &&
       (req.agent_runtime === undefined ||
