@@ -16,7 +16,7 @@
  */
 
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { eq, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, closeDb } from './client.ts';
 import { projects } from './schema.ts';
 import { seedFromEnv } from './seed.ts';
@@ -35,13 +35,26 @@ async function upsertSeedProject(
   db: Db,
   entry: ProjectEntry,
 ): Promise<void> {
-  const existing = await db
+  const byId = await db
     .select()
     .from(projects)
-    .where(or(eq(projects.id, entry.id), eq(projects.slug, entry.slug)))
+    .where(eq(projects.id, entry.id))
+    .limit(1);
+  const bySlug = await db
+    .select()
+    .from(projects)
+    .where(eq(projects.slug, entry.slug))
     .limit(1);
 
-  const row = existing[0];
+  const idRow = byId[0];
+  const slugRow = bySlug[0];
+  if (idRow && slugRow && idRow.id !== slugRow.id) {
+    throw new Error(
+      `Project seed conflict for slug ${entry.slug}: incoming id ${entry.id} matches ${idRow.id}, but slug matches ${slugRow.id}.`,
+    );
+  }
+
+  const row = idRow ?? slugRow;
   if (!row) {
     await db.insert(projects).values({
       id: entry.id,

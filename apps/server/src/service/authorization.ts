@@ -24,7 +24,7 @@ export class AuthorizationForbiddenError extends Error {
     super(
       reason === 'human_required'
         ? 'only human actors may manage actors'
-        : 'actor role member is not allowed to manage actors',
+        : 'actor role is not authorized to manage actors',
     );
     this.name = 'AuthorizationForbiddenError';
   }

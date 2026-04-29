@@ -72,7 +72,7 @@ export async function seedFromEnv(
           // we'd never zero out createdAt because we don't set it.
           source: 'env',
           kind: e.kind,
-          role: e.role ?? 'admin',
+          ...(e.role !== undefined ? { role: e.role } : {}),
           displayName: e.display_name,
           agentRuntime: e.agent_runtime ?? null,
           parentActorId: e.parent_actor_id ?? null,

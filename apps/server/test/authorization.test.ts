@@ -67,7 +67,7 @@ describe('authorization service kernel', () => {
         role: 'member',
       }),
     ).toThrowErrorMatchingInlineSnapshot(
-      `[AuthorizationForbiddenError: actor role member is not allowed to manage actors]`,
+      `[AuthorizationForbiddenError: actor role is not authorized to manage actors]`,
     );
   });
 

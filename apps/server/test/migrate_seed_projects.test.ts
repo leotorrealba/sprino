@@ -54,4 +54,26 @@ describe('project seed merge strategy', () => {
     expect(rows[0]!.displayName).toBe('Sprino Renamed Again');
     expect(rows[0]!.repoPath).toBe('/tmp/sprino-again');
   });
+
+  it('fails deterministically when incoming id and slug match different existing rows', async () => {
+    await db.insert(projects).values({
+      id: '018c3e7a-0002-7000-8000-000000000123',
+      slug: 'sprino-shadow',
+      displayName: 'Shadow',
+      repoPath: null,
+    });
+
+    await expect(
+      seedProjects(db, {
+        SPRINO_PROJECTS_JSON: JSON.stringify([
+          {
+            id: '018c3e7a-0002-7000-8000-000000000123',
+            slug: FIXTURE_PROJECT_SLUG,
+            display_name: 'Ambiguous',
+            repo_path: null,
+          },
+        ]),
+      }),
+    ).rejects.toThrow(/Project seed conflict for slug sprino/);
+  });
 });

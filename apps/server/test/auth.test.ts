@@ -231,6 +231,42 @@ describe('auth/registry — DB lookups', () => {
       role: 'member',
     });
   });
+
+  it('preserves an existing env actor role when the env entry omits role', async () => {
+    const actorId = uuidv7();
+    const plain = 'env-role-preserve-token-12345';
+    await db.insert(actors).values({
+      id: actorId,
+      kind: 'human',
+      role: 'member',
+      displayName: 'Preserved Env Member',
+      source: 'env',
+    });
+    await db.insert(actorTokens).values({
+      id: uuidv7(),
+      actorId,
+      tokenHash: hashToken(plain),
+      source: 'env',
+    });
+
+    await seedFromEnv(
+      db,
+      JSON.stringify([
+        {
+          id: actorId,
+          kind: 'human',
+          display_name: 'Preserved Env Member',
+          token: plain,
+        },
+      ]),
+    );
+
+    const [row] = await db
+      .select({ role: actors.role })
+      .from(actors)
+      .where(eq(actors.id, actorId));
+    expect(row?.role).toBe('member');
+  });
 });
 
 describe('Bearer-token middleware via tokenAuth', () => {
