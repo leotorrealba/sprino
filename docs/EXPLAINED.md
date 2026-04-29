@@ -149,13 +149,17 @@ teammate. Tokens can be rotated and revoked from the same screen with
 no downtime. The plaintext token is shown exactly once — copy it then,
 or rotate again.
 
-**2. You can always recover access, even if everything goes wrong.**
-Every actor is tagged with a `source`: either `env` (declared in
-`.env`) or `db` (created in-app). On every server boot, Sprino reads
-`SPRINO_ACTORS_JSON` and re-imports those actors — re-activating their
-tokens even if someone tampered with the database. So the env file
-remains your floor: as long as you can edit it and restart, you can
-get back in. `docs/TOKEN-RECOVERY.md` is the playbook.
+**2. Your `.env` is your floor: lose the database, recover from `.env`.**
+Every actor row carries a `source` flag: either `env` (declared in
+`SPRINO_ACTORS_JSON`) or `db` (created in-app). On every server boot,
+Sprino reads the env file and imports any new entries — so even if
+the database is wiped clean, restarting with a populated `.env` gives
+you a working credential again. The reverse case (an attacker revokes
+your env credential by writing to the database directly) is recovered
+by editing `.env` with a *fresh* token and restarting; Sprino
+intentionally refuses to "un-revoke" a previously-revoked token —
+re-introducing the same plaintext is treated as a security smell.
+`docs/TOKEN-RECOVERY.md` is the full playbook.
 
 ## Where to go from here
 

@@ -184,13 +184,23 @@ its caller arrived via HTTP or MCP.
 ### Auth
 
 - HTTP and MCP both require `Authorization: Bearer <token>`.
-- Tokens are loaded from the `SPRINO_ACTORS_JSON` env var at startup
-  (`auth/registry.ts`). Each token maps to an actor (human or agent).
+- All tokens live in the `actor_tokens` table (`token_hash` is
+  `sha256(plaintext)`; plaintext is never persisted). The bearer
+  middleware always queries `actor_tokens JOIN actors` — there is no
+  fallback to an in-memory env registry at request time. This single
+  auth path eliminates the "two registries can disagree" failure mode
+  that the v0.0.7 boot-time-only registry was vulnerable to.
+- Env-declared actors (`SPRINO_ACTORS_JSON`) are imported into the
+  database on every boot by `seedFromEnv()` (`apps/server/src/db/seed.ts`).
+  Each row carries `source: 'env' | 'db'` so the Members UI can disable
+  rotate/revoke for env-managed credentials. See
+  [Section 10b](#10b-actor-lifecycle-v009) for the full reconciliation
+  contract and recovery story.
 - The middleware attaches the resolved `actor` to the Hono request
-  context for the HTTP/MCP adapters. Those adapters then pass `actorId`
-  explicitly into `service/*` functions for `created_by` fields and the
-  event log's actor reference; the service layer is transport-agnostic
-  and does not depend on Hono context.
+  context. The HTTP/MCP adapters then pass `actorId` explicitly into
+  `service/*` functions for `created_by` fields and the event log's
+  actor reference; the service layer is transport-agnostic and does
+  not depend on Hono context.
 - For SSE, browsers can't set custom headers on `EventSource`, so we issue
   short-lived **stream tickets** signed with HMAC-SHA256 over
   `${actorId}.${projectId}.${exp}`. The issued ticket is the dotted string
