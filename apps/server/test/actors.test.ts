@@ -32,7 +32,7 @@ import {
 } from '../src/service/actors.ts';
 import { hashToken, lookupActorByToken } from '../src/auth/registry.ts';
 import type { Actor } from '../src/domain/index.ts';
-import { FIXTURE_ACTOR_ID, FIXTURE_TOKEN } from './setup.ts';
+import { FIXTURE_ACTOR_ID } from './setup.ts';
 
 describe('registerActor — idempotency redaction', () => {
   it('does NOT persist the plaintext token in operations.response_body', async () => {
@@ -235,6 +235,5 @@ describe('rotateToken — happy path stores hash, not plaintext', () => {
     // Authenticate against the bearer-token middleware path.
     const lookup = await lookupActorByToken(db, rot.token);
     expect(lookup?.id).toBe(minted.actor.id);
-    expect(FIXTURE_TOKEN).toBe(FIXTURE_TOKEN); // keep linter quiet about unused import
   });
 });
