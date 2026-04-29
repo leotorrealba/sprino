@@ -190,6 +190,17 @@ export type TaskListReq = z.infer<typeof TaskListReqSchema>;
 export const AgentListReqSchema = paginationSchema(MAX_LIMITS.agents);
 export type AgentListReq = z.infer<typeof AgentListReqSchema>;
 
+export const ActorLifecycleStateSchema = z.enum(['active', 'inactive']);
+export type ActorLifecycleState = z.infer<typeof ActorLifecycleStateSchema>;
+
+export const AgentLifecycleTransitionIntentSchema = z.enum([
+  'heartbeat',
+  'deactivate',
+]);
+export type AgentLifecycleTransitionIntent = z.infer<
+  typeof AgentLifecycleTransitionIntentSchema
+>;
+
 // ────────────────────────────────────────────────────────────────────────
 // Verbs — response shapes
 // ────────────────────────────────────────────────────────────────────────

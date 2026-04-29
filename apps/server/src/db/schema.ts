@@ -27,11 +27,17 @@ import {
 } from 'drizzle-orm/pg-core';
 
 // ────────────────────────────────────────────────────────────────────────
-// ENUMS — keep these aligned with tessera/schemas/resources/*.json
+// ENUMS — keep wire-facing enums aligned with tessera/schemas/resources/*.json.
+// Internal storage enums may extend Sprino-only state that later packets
+// project back into Tessera verbs without becoming canonical resource fields.
 // ────────────────────────────────────────────────────────────────────────
 
 export const actorKindEnum = pgEnum('actor_kind', ['human', 'agent']);
 export const actorRoleEnum = pgEnum('actor_role', ['admin', 'member']);
+export const actorLifecycleStateEnum = pgEnum('actor_lifecycle_state', [
+  'active',
+  'inactive',
+]);
 export const taskStatusEnum = pgEnum('task_status', [
   'todo',
   'doing',
@@ -50,21 +56,45 @@ export const eventKindEnum = pgEnum('event_kind', [
 // TABLES
 // ────────────────────────────────────────────────────────────────────────
 
-export const actors = pgTable('actors', {
-  id: uuid('id').primaryKey(),
-  kind: actorKindEnum('kind').notNull(),
-  role: actorRoleEnum('role').notNull().default('admin'),
-  displayName: text('display_name').notNull(),
-  agentRuntime: text('agent_runtime'),
-  parentActorId: uuid('parent_actor_id'),
-  // 'env' = imported from SPRINO_ACTORS_JSON at boot; 'db' = minted via
-  // actor.register. env actors are immutable from the API — recover by
-  // editing .env and restarting.
-  source: text('source').notNull().default('db'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const actors = pgTable(
+  'actors',
+  {
+    id: uuid('id').primaryKey(),
+    kind: actorKindEnum('kind').notNull(),
+    role: actorRoleEnum('role').notNull().default('admin'),
+    displayName: text('display_name').notNull(),
+    agentRuntime: text('agent_runtime'),
+    parentActorId: uuid('parent_actor_id'),
+    lifecycleState: actorLifecycleStateEnum('lifecycle_state')
+      .notNull()
+      .default('active'),
+    // NULL until the first successful heartbeat. Future expiry logic MUST
+    // interpret NULL as "no heartbeat observed yet" and fall back to
+    // created_at instead of assuming a synthetic heartbeat timestamp.
+    lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+    // Storage-only terminal marker. B2-P1 intentionally keeps a single
+    // non-active state ('inactive'); later packets can explain whether that
+    // inactivity came from explicit deactivation or expiry in service logic.
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+    // 'env' = imported from SPRINO_ACTORS_JSON at boot; 'db' = minted via
+    // actor.register. env actors are immutable from the API — recover by
+    // editing .env and restarting.
+    source: text('source').notNull().default('db'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    lifecycleStateIdx: index('actors_lifecycle_state_idx').on(
+      t.lifecycleState,
+    ),
+    agentLivenessIdx: index('actors_agent_liveness_idx').on(
+      t.kind,
+      t.lifecycleState,
+      t.lastHeartbeatAt,
+    ),
+  }),
+);
 
 /**
  * Bearer credentials. Stored as sha256(plaintext) — plaintext is returned

@@ -41,7 +41,9 @@ import type { ActorRow } from '../db/schema.ts';
 import { hashToken } from '../auth/registry.ts';
 import {
   type Actor,
+  type ActorLifecycleState,
   type ActorGetReq,
+  type AgentLifecycleTransitionIntent,
   type ActorListReq,
   type ActorRegisterReq,
   type ActorRevokeTokenReq,
@@ -94,6 +96,41 @@ export class ActorValidationError extends Error {
   ) {
     super(`validation failed: ${field}: ${reason}`);
     this.name = 'ActorValidationError';
+  }
+}
+
+export type ActorLifecycleTransitionErrorCode =
+  | 'actor_kind_not_agent'
+  | 'invalid_lifecycle_transition';
+
+export class ActorLifecycleTransitionError extends Error {
+  public readonly actorId: string;
+  public readonly transition: AgentLifecycleTransitionIntent;
+  public readonly code: ActorLifecycleTransitionErrorCode;
+  public readonly actorKind?: ActorRow['kind'];
+  public readonly fromState?: ActorLifecycleState;
+  public readonly toState?: ActorLifecycleState;
+
+  constructor(args: {
+    actorId: string;
+    transition: AgentLifecycleTransitionIntent;
+    code: ActorLifecycleTransitionErrorCode;
+    actorKind?: ActorRow['kind'];
+    fromState?: ActorLifecycleState;
+    toState?: ActorLifecycleState;
+  }) {
+    const detail =
+      args.code === 'actor_kind_not_agent'
+        ? `actor ${args.actorId} is ${args.actorKind}; ${args.transition} only supports agent actors`
+        : `illegal agent lifecycle transition: ${args.transition} cannot move actor ${args.actorId} from ${args.fromState} to ${args.toState}`;
+    super(detail);
+    this.name = 'ActorLifecycleTransitionError';
+    this.actorId = args.actorId;
+    this.transition = args.transition;
+    this.code = args.code;
+    this.actorKind = args.actorKind;
+    this.fromState = args.fromState;
+    this.toState = args.toState;
   }
 }
 
@@ -288,6 +325,77 @@ export async function getActor(
   const row = await fetchActorRow(db, args.req.actor_id);
   if (!row) throw new ActorNotFoundError(args.req.actor_id);
   return { actor: rowToActor(row) };
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// agent lifecycle transitions — internal service primitive
+// ────────────────────────────────────────────────────────────────────────
+
+export async function transitionAgentLifecycle(
+  db: Db,
+  args: {
+    actorId: string;
+    transition: AgentLifecycleTransitionIntent;
+    now?: Date;
+  },
+): Promise<{ actor: Actor }> {
+  const now = args.now ?? new Date();
+
+  return await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(actors)
+      .where(eq(actors.id, args.actorId))
+      .for('update')
+      .limit(1);
+    if (!locked) throw new ActorNotFoundError(args.actorId);
+
+    if (locked.kind !== 'agent') {
+      throw new ActorLifecycleTransitionError({
+        actorId: args.actorId,
+        actorKind: locked.kind,
+        transition: args.transition,
+        code: 'actor_kind_not_agent',
+      });
+    }
+
+    if (args.transition === 'heartbeat') {
+      if (locked.lifecycleState !== 'active') {
+        throw new ActorLifecycleTransitionError({
+          actorId: args.actorId,
+          transition: args.transition,
+          code: 'invalid_lifecycle_transition',
+          fromState: locked.lifecycleState,
+          toState: 'active',
+        });
+      }
+      const [updated] = await tx
+        .update(actors)
+        .set({ lastHeartbeatAt: now })
+        .where(eq(actors.id, args.actorId))
+        .returning();
+      return { actor: rowToActor(updated!) };
+    }
+
+    if (args.transition === 'deactivate') {
+      if (locked.lifecycleState === 'inactive') {
+        return { actor: rowToActor(locked) };
+      }
+
+      const [updated] = await tx
+        .update(actors)
+        .set({
+          lifecycleState: 'inactive',
+          deactivatedAt: now,
+        })
+        .where(eq(actors.id, args.actorId))
+        .returning();
+      return { actor: rowToActor(updated!) };
+    }
+
+    const exhaustive: never = args.transition;
+    throw new Error(`unsupported agent lifecycle transition: ${exhaustive}`);
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────
