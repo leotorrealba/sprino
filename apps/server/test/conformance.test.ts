@@ -23,9 +23,11 @@ import { db } from '../src/db/client.ts';
 import { projects } from '../src/db/schema.ts';
 import {
   FIXTURE_ACTOR_ID,
+  FIXTURE_AGENT_TOKEN,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
   buildTestApp,
+  seedDbActor,
 } from './setup.ts';
 
 const FIXTURE_DIR = path.resolve(
@@ -47,6 +49,21 @@ function bearer(body: unknown, method = 'POST'): RequestInit {
     method,
     headers: {
       authorization: `Bearer ${FIXTURE_TOKEN}`,
+      'content-type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
+}
+
+function bearerForToken(
+  token: string,
+  body: unknown,
+  method = 'POST',
+): RequestInit {
+  return {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
       'content-type': 'application/json',
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -902,5 +919,94 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     expect(r.status).toBe(200);
     const body = (await r.json()) as { actors: Array<{ kind: string }> };
     expect(body.actors.every((a) => a.kind === 'human')).toBe(true);
+  });
+
+  it('returns 403 _error envelope for unauthorized actor.register over HTTP', async () => {
+    const app = buildTestApp();
+    const member = await seedDbActor({
+      displayName: 'HTTP Member',
+      role: 'member',
+    });
+
+    const r = await app.fetch(
+      new Request(
+        'http://test/api/actors',
+        bearerForToken(member.token, {
+          operation_id: '018c3e7a-aaaa-7000-8000-000000000101',
+          display_name: 'Forbidden Register',
+          kind: 'human',
+        }),
+      ),
+    );
+    expect(r.status).toBe(403);
+    const body = (await r.json()) as {
+      _error: { status: number; code: string; details: { field: string; reason: string } };
+    };
+    expect(body._error.status).toBe(403);
+    expect(body._error.code).toBe('forbidden');
+    expect(body._error.details.field).toBe('actor_id');
+  });
+
+  it('returns forbidden parity for actor admin verbs over MCP and HTTP', async () => {
+    const app = buildTestApp();
+    const member = await seedDbActor({
+      displayName: 'MCP Member',
+      role: 'member',
+    });
+    const target = await app.fetch(
+      new Request(
+        'http://test/api/actors',
+        bearer({
+          operation_id: '018c3e7a-aaaa-7000-8000-000000000102',
+          display_name: 'Rotate Candidate',
+          kind: 'human',
+        }),
+      ),
+    );
+    const targetJson = (await target.json()) as { actor: { id: string } };
+
+    const revokeRpc = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearerForToken(member.token, {
+          jsonrpc: '2.0',
+          id: 99,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.revoke_token',
+            arguments: {
+              operation_id: '018c3e7a-aaaa-7000-8000-000000000103',
+              actor_id: targetJson.actor.id,
+            },
+          },
+        }),
+      ),
+    );
+    expect(revokeRpc.status).toBe(200);
+    const revokeBody = (await revokeRpc.json()) as {
+      error: { code: number; message: string };
+    };
+    expect(revokeBody.error.code).toBe(-32003);
+    expect(revokeBody.error.message).toBe('forbidden');
+
+    const rotateHttp = await app.fetch(
+      new Request(
+        `http://test/api/actors/${targetJson.actor.id}/rotate_token`,
+        bearerForToken(member.token, {}, 'POST'),
+      ),
+    );
+    expect(rotateHttp.status).toBe(403);
+
+    const agentRegister = await app.fetch(
+      new Request(
+        'http://test/api/actors',
+        bearerForToken(FIXTURE_AGENT_TOKEN, {
+          operation_id: '018c3e7a-aaaa-7000-8000-000000000104',
+          display_name: 'Agent Blocked',
+          kind: 'human',
+        }),
+      ),
+    );
+    expect(agentRegister.status).toBe(403);
   });
 });

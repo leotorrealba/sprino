@@ -17,13 +17,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Hono } from 'hono';
 import {
   hashToken,
   lookupActorByToken,
   lookupActorById,
   parseActorsEnv,
 } from '../src/auth/registry.ts';
+import { tokenAuth } from '../src/auth/middleware.ts';
+import type { AuthVars } from '../src/auth/middleware.ts';
 import { db } from '../src/db/client.ts';
+import { seedFromEnv } from '../src/db/seed.ts';
 import { actors, actorTokens } from '../src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -59,6 +63,20 @@ describe('auth/registry — parseActorsEnv', () => {
     expect(parsed).toHaveLength(2);
     expect(parsed[0]?.display_name).toBe('Leo');
     expect(parsed[1]?.kind).toBe('agent');
+  });
+
+  it('parses an explicit role when present', () => {
+    const raw = JSON.stringify([
+      {
+        id: '018c3e7a-0001-7000-8000-000000000001',
+        kind: 'human',
+        display_name: 'Leo',
+        token: 'leo-token-12345',
+        role: 'member',
+      },
+    ]);
+    const parsed = parseActorsEnv(raw);
+    expect(parsed[0]?.role).toBe('member');
   });
 
   it('throws on invalid JSON', () => {
@@ -126,6 +144,7 @@ describe('auth/registry — DB lookups', () => {
     const found = await lookupActorByToken(db, FIXTURE_TOKEN);
     expect(found?.id).toBe(FIXTURE_ACTOR_ID);
     expect(found?.source).toBe('env');
+    expect(found?.role).toBe('admin');
   });
 
   it('returns undefined for an unknown token', async () => {
@@ -135,6 +154,7 @@ describe('auth/registry — DB lookups', () => {
   it('looks up an env-seeded actor by id', async () => {
     const found = await lookupActorById(db, FIXTURE_ACTOR_ID);
     expect(found?.kind).toBe('human');
+    expect(found?.role).toBe('admin');
   });
 
   it('returns undefined for an unknown actor id', async () => {
@@ -161,6 +181,55 @@ describe('auth/registry — DB lookups', () => {
       revokedAt: new Date(),
     });
     expect(await lookupActorByToken(db, plain)).toBeUndefined();
+  });
+
+  it('hydrates an explicit role for an env-seeded actor', async () => {
+    const actorId = uuidv7();
+    const plain = 'env-member-token-12345';
+    await seedFromEnv(
+      db,
+      JSON.stringify([
+        {
+          id: actorId,
+          kind: 'human',
+          display_name: 'Env Member',
+          token: plain,
+          role: 'member',
+        },
+      ]),
+    );
+
+    const found = await lookupActorByToken(db, plain);
+    expect(found).toMatchObject({
+      id: actorId,
+      source: 'env',
+      role: 'member',
+    });
+  });
+
+  it('hydrates role for a db-backed actor', async () => {
+    const actorId = uuidv7();
+    const plain = 'db-member-token-12345';
+    await db.insert(actors).values({
+      id: actorId,
+      kind: 'human',
+      role: 'member',
+      displayName: 'DB Member',
+      source: 'db',
+    });
+    await db.insert(actorTokens).values({
+      id: uuidv7(),
+      actorId,
+      tokenHash: hashToken(plain),
+      source: 'db',
+    });
+
+    const found = await lookupActorByToken(db, plain);
+    expect(found).toMatchObject({
+      id: actorId,
+      source: 'db',
+      role: 'member',
+    });
   });
 });
 
@@ -204,6 +273,30 @@ describe('Bearer-token middleware via tokenAuth', () => {
       }),
     );
     expect(r.status).toBe(200);
+  });
+
+  it('makes role available in protected request context', async () => {
+    const app = new Hono<{ Variables: AuthVars }>();
+    app.use('*', async (c, next) => {
+      c.set('db', db);
+      await next();
+    });
+    app.use('/protected/*', tokenAuth);
+    app.get('/protected/role', (c) => {
+      const actor = c.get('actor');
+      return c.json({ actor_id: actor.id, role: actor.role }, 200);
+    });
+
+    const r = await app.fetch(
+      new Request('http://test/protected/role', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(200);
+    await expect(r.json()).resolves.toEqual({
+      actor_id: FIXTURE_ACTOR_ID,
+      role: 'admin',
+    });
   });
 
   it('rejects a revoked token on the very next request', async () => {

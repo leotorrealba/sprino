@@ -32,6 +32,7 @@ import {
   issueStreamTicket,
   verifyStreamTicket,
 } from '../src/auth/stream-ticket.ts';
+import { registerActor, revokeToken } from '../src/service/actors.ts';
 
 const OTHER_PROJECT_ID = '018c3e7a-0002-7000-8000-0000000000ff';
 
@@ -255,6 +256,25 @@ describe('Phase 6C — SSE stream replay + headers', () => {
     return { status: res.status, headers: res.headers, body: buf };
   }
 
+  async function registerDbActor(name: string): Promise<{
+    actorId: string;
+    token: string;
+  }> {
+    const opId = uuidv7();
+    const res = await registerActor(db, {
+      callerId: FIXTURE_ACTOR_ID,
+      req: {
+        operation_id: opId,
+        display_name: name,
+        kind: 'human',
+      },
+    });
+    if (!('token' in res)) {
+      throw new Error('expected first-time actor.register response');
+    }
+    return { actorId: res.actor.id, token: res.token };
+  }
+
   it('emits SSE-formatted replay for events newer than last_event_id', async () => {
     // Seed 3 tasks (each generates a "created" event).
     for (let i = 0; i < 3; i += 1) {
@@ -331,5 +351,87 @@ describe('Phase 6C — SSE stream replay + headers', () => {
     expect(status).toBe(200);
     // Initial keep-alive is `: ping\n\n` — the colon is the SSE comment marker.
     expect(body).toMatch(/:\s*ping/);
+  });
+
+  it('rejects a stale SSE ticket after the actor credential is revoked', async () => {
+    const { actorId } = await registerDbActor('Revoked Stream Viewer');
+    const { ticket } = issueStreamTicket(actorId, FIXTURE_PROJECT_ID);
+
+    await revokeToken(db, {
+      callerId: FIXTURE_ACTOR_ID,
+      req: {
+        operation_id: uuidv7(),
+        actor_id: actorId,
+      },
+    });
+
+    const { status, body } = await readStream(
+      `http://t/api/events/stream?project_id=${FIXTURE_PROJECT_ID}&ticket=${encodeURIComponent(
+        ticket,
+      )}`,
+    );
+
+    expect(status).toBe(403);
+    expect(body).toContain('revoked');
+  });
+
+  it('stops an already-open SSE stream after credential revocation', async () => {
+    const { actorId } = await registerDbActor('Live Revoked Stream Viewer');
+    const { ticket } = issueStreamTicket(actorId, FIXTURE_PROJECT_ID);
+
+    const app = buildTestApp();
+    const ac = new AbortController();
+    aborters.push(ac);
+    const res = await app.fetch(
+      new Request(
+        `http://t/api/events/stream?project_id=${FIXTURE_PROJECT_ID}&ticket=${encodeURIComponent(
+          ticket,
+        )}`,
+        { signal: ac.signal },
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    buf += dec.decode(first.value, { stream: true });
+    expect(buf).toMatch(/:\s*ping/);
+
+    await revokeToken(db, {
+      callerId: FIXTURE_ACTOR_ID,
+      req: {
+        operation_id: uuidv7(),
+        actor_id: actorId,
+      },
+    });
+
+    const created = await createTask(db, {
+      actorId: FIXTURE_ACTOR_ID,
+      req: {
+        project_id: FIXTURE_PROJECT_ID,
+        title: 'post-revoke-stream-event',
+        operation_id: uuidv7(),
+      },
+    });
+
+    const next = await Promise.race([
+      reader.read(),
+      new Promise<{ done: true; value: undefined }>((resolve) =>
+        setTimeout(() => resolve({ done: true, value: undefined }), 4500),
+      ),
+    ]);
+
+    if (!next.done && next.value) {
+      buf += dec.decode(next.value, { stream: true });
+    }
+    ac.abort();
+
+    expect(buf).not.toContain(created.event.id);
   });
 });

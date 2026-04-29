@@ -18,25 +18,20 @@
 
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import type { ActorEntry } from './auth/registry.ts';
 import { tokenAuth } from './auth/middleware.ts';
+import type { AuthEnv } from './auth/middleware.ts';
 import { db, closeDb } from './db/client.ts';
-import type { Db } from './db/client.ts';
 import { seedFromEnv } from './db/seed.ts';
 import { buildHttpRoutes } from './adapters/http/routes.ts';
 import { sseHandler } from './adapters/http/sse.ts';
 import { buildMcpRoutes } from './adapters/mcp/server.ts';
 
-type Env = {
-  Variables: { actor: ActorEntry; db: Db };
-};
-
-async function buildApp(): Promise<Hono<Env>> {
+async function buildApp(): Promise<Hono<AuthEnv>> {
   // Reconcile env-seeded actors + tokens with the DB. Idempotent: safe to
   // re-run on every boot. Token recovery flow is "edit .env and restart".
   await seedFromEnv(db);
 
-  const app = new Hono<Env>();
+  const app = new Hono<AuthEnv>();
 
   app.use('*', async (c, next) => {
     c.set('db', db);
@@ -57,7 +52,7 @@ async function buildApp(): Promise<Hono<Env>> {
   app.get('/api/events/stream', sseHandler);
 
   // /api/* — REST. Auth required.
-  const api = new Hono<Env>();
+  const api = new Hono<AuthEnv>();
   api.use('*', tokenAuth);
   api.route('/', buildHttpRoutes());
   app.route('/api', api);
@@ -65,7 +60,7 @@ async function buildApp(): Promise<Hono<Env>> {
   // /mcp — JSON-RPC 2.0 over HTTP. Auth required.
   // Tokens come from MCP server config (NEVER tool inputs — see SECURITY note
   // in design doc §Secrets & Auth).
-  const mcp = new Hono<Env>();
+  const mcp = new Hono<AuthEnv>();
   mcp.use('*', tokenAuth);
   mcp.route('/', buildMcpRoutes());
   app.route('/mcp', mcp);

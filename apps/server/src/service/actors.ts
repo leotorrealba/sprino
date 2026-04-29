@@ -32,7 +32,7 @@
  *   ActorValidationError        → 400 validation_error (with field/reason)
  */
 
-import { and, asc, count, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
@@ -51,6 +51,7 @@ import {
   hashRequest,
   recordOperation,
 } from './idempotency.ts';
+import { assertCanManageActors } from './authorization.ts';
 
 // ────────────────────────────────────────────────────────────────────────
 // Errors
@@ -133,6 +134,19 @@ async function fetchActorRow(
   return rows[0];
 }
 
+async function assertCallerCanManageActors(
+  db: Db,
+  callerId: string,
+): Promise<void> {
+  const caller = await fetchActorRow(db, callerId);
+  if (!caller) throw new ActorNotFoundError(callerId);
+  assertCanManageActors({
+    id: caller.id,
+    kind: caller.kind,
+    role: caller.role,
+  });
+}
+
 function isUniqueViolation(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
   const e = err as { code?: unknown };
@@ -170,6 +184,8 @@ export async function registerActor(
   db: Db,
   args: { req: ActorRegisterReq; callerId: string },
 ): Promise<ActorRegisterResponse> {
+  await assertCallerCanManageActors(db, args.callerId);
+
   // v0.1.2 humans-only. Zod already enforces this; defensive guard so a
   // stray adapter that forgot to validate can't slip an agent past us.
   if (args.req.kind !== 'human') {
@@ -364,13 +380,16 @@ export async function listMembers(
  *
  * Last-admin guard: if revoking would leave zero humans with active
  * credentials in the system, throw LastAdminProtectedError. Computed
- * inside the transaction with a SELECT FOR UPDATE on the actor row to
- * prevent a TOCTOU race against a concurrent revoke of a different actor.
+ * inside the transaction while locking the full active-human set in
+ * stable id order so concurrent revokes cannot both observe "another
+ * human still exists" and drop the system to zero.
  */
 export async function revokeToken(
   db: Db,
   args: { req: ActorRevokeTokenReq; callerId: string },
 ): Promise<{ actor: Actor }> {
+  await assertCallerCanManageActors(db, args.callerId);
+
   const requestHash = hashRequest(args.req);
 
   const cached = await checkIdempotency(
@@ -390,6 +409,23 @@ export async function revokeToken(
 
   try {
     return await db.transaction(async (tx) => {
+      let activeIds: string[] = [];
+      if (pre.kind === 'human') {
+        const activeHumans = await tx
+          .select({ actorId: actors.id })
+          .from(actors)
+          .innerJoin(actorTokens, eq(actorTokens.actorId, actors.id))
+          .where(
+            and(
+              eq(actors.kind, 'human'),
+              isNull(actorTokens.revokedAt),
+            ),
+          )
+          .orderBy(asc(actors.id))
+          .for('update');
+        activeIds = activeHumans.map((row) => row.actorId);
+      }
+
       const [locked] = await tx
         .select()
         .from(actors)
@@ -397,22 +433,14 @@ export async function revokeToken(
         .for('update');
       if (!locked) throw new ActorNotFoundError(args.req.actor_id);
 
-      // Last-admin guard: count humans (other than this one) that still
-      // have an active token. If the target is human and that count is
-      // zero, refuse — the system would lock itself out.
+      // Last-admin guard: the active human actor-set was locked above in
+      // stable order. That prevents two concurrent revokes from both
+      // observing a non-zero "other human" count and committing.
       if (locked.kind === 'human') {
-        const remaining = await tx
-          .select({ value: count() })
-          .from(actors)
-          .innerJoin(actorTokens, eq(actorTokens.actorId, actors.id))
-          .where(
-            and(
-              eq(actors.kind, 'human'),
-              isNull(actorTokens.revokedAt),
-              ne(actors.id, args.req.actor_id),
-            ),
-          );
-        if ((remaining[0]?.value ?? 0) === 0) {
+        if (
+          activeIds.includes(args.req.actor_id) &&
+          activeIds.filter((id) => id !== args.req.actor_id).length === 0
+        ) {
           throw new LastAdminProtectedError(args.req.actor_id);
         }
       }
@@ -466,8 +494,10 @@ export async function revokeToken(
  */
 export async function rotateToken(
   db: Db,
-  args: { actorId: string },
+  args: { actorId: string; callerId: string },
 ): Promise<{ actor: Actor; token: string }> {
+  await assertCallerCanManageActors(db, args.callerId);
+
   const pre = await fetchActorRow(db, args.actorId);
   if (!pre) throw new ActorNotFoundError(args.actorId);
   if (pre.source === 'env') {

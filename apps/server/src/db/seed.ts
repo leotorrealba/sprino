@@ -8,7 +8,8 @@
  *
  * Behavior:
  *   - UPSERT each env actor as `source='env'`. Existing actor with the
- *     same id keeps its current row (we only flip source to 'env').
+ *     same id keeps its current row unless the operator explicitly sets
+ *     a different internal role in `SPRINO_ACTORS_JSON`.
  *   - For each env entry, ensure exactly one active token exists in
  *     actor_tokens. If the env token's hash is already present and not
  *     revoked, do nothing. Otherwise insert it (and the partial unique
@@ -56,6 +57,7 @@ export async function seedFromEnv(
       .values({
         id: e.id,
         kind: e.kind,
+        role: e.role ?? 'admin',
         displayName: e.display_name,
         agentRuntime: e.agent_runtime ?? null,
         parentActorId: e.parent_actor_id ?? null,
@@ -70,6 +72,7 @@ export async function seedFromEnv(
           // we'd never zero out createdAt because we don't set it.
           source: 'env',
           kind: e.kind,
+          role: e.role ?? 'admin',
           displayName: e.display_name,
           agentRuntime: e.agent_runtime ?? null,
           parentActorId: e.parent_actor_id ?? null,

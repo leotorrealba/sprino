@@ -23,6 +23,7 @@ import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
+import type { AuthEnv } from '../../auth/middleware.ts';
 import {
   ProjectGetReqSchema,
   TaskCreateReqSchema,
@@ -59,8 +60,9 @@ import {
   registerActor,
   revokeToken,
 } from '../../service/actors.ts';
+import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 
-type Env = { Variables: { actor: ActorEntry; db: Db } };
+type Env = AuthEnv;
 
 interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -384,6 +386,13 @@ function translateError(
   }
   if (err instanceof ActorNotFoundError) {
     return rpcError(id, -32004, 'not_found', { actor_id: err.actorId });
+  }
+  if (err instanceof AuthorizationForbiddenError) {
+    return rpcError(id, -32003, 'forbidden', {
+      actor_id: err.actorId,
+      capability: err.capability,
+      reason: err.reason,
+    });
   }
   if (err instanceof LastAdminProtectedError) {
     return rpcError(id, -32012, 'last_admin_protected', {

@@ -25,8 +25,7 @@
  */
 
 import { Hono } from 'hono';
-import type { ActorEntry } from '../../auth/registry.ts';
-import type { Db } from '../../db/client.ts';
+import type { AuthEnv } from '../../auth/middleware.ts';
 import {
   AgentListReqSchema,
   EventListReqSchema,
@@ -60,6 +59,7 @@ import {
   revokeToken,
   rotateToken,
 } from '../../service/actors.ts';
+import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
@@ -77,12 +77,8 @@ import {
 } from '../../service/idempotency.ts';
 import { ZodError } from 'zod';
 
-type Env = {
-  Variables: { actor: ActorEntry; db: Db };
-};
-
-export function buildHttpRoutes(): Hono<Env> {
-  const api = new Hono<Env>();
+export function buildHttpRoutes(): Hono<AuthEnv> {
+  const api = new Hono<AuthEnv>();
 
   api.get('/projects', async (c) => {
     try {
@@ -339,6 +335,7 @@ export function buildHttpRoutes(): Hono<Env> {
     try {
       const res = await rotateToken(c.get('db'), {
         actorId: c.req.param('id'),
+        callerId: c.get('actor').id,
       });
       return c.json(res, 200);
     } catch (err) {
@@ -398,6 +395,24 @@ function actorErrorResponse(c: any, err: unknown): Response {
         },
       },
       404,
+    );
+  }
+  if (err instanceof AuthorizationForbiddenError) {
+    return c.json(
+      {
+        _error: {
+          status: 403,
+          code: 'forbidden',
+          details: {
+            field: 'actor_id',
+            reason:
+              err.reason === 'human_required'
+                ? 'Only human admin actors may manage actors.'
+                : 'Actor role is not authorized to manage actors.',
+          },
+        },
+      },
+      403,
     );
   }
   if (err instanceof LastAdminProtectedError) {

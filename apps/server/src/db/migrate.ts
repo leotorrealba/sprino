@@ -16,9 +16,11 @@
  */
 
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { eq, or } from 'drizzle-orm';
 import { db, closeDb } from './client.ts';
 import { projects } from './schema.ts';
 import { seedFromEnv } from './seed.ts';
+import type { Db } from './client.ts';
 
 interface ProjectEntry {
   id: string;
@@ -27,44 +29,62 @@ interface ProjectEntry {
   repo_path?: string | null;
 }
 
-async function seedProjects(): Promise<void> {
-  const projectsJson = process.env.SPRINO_PROJECTS_JSON;
-  const projectId = process.env.SPRINO_DEFAULT_PROJECT_ID;
-  const projectSlug = process.env.SPRINO_DEFAULT_PROJECT_SLUG;
+type ProjectSeedEnv = Record<string, string | undefined>;
+
+async function upsertSeedProject(
+  db: Db,
+  entry: ProjectEntry,
+): Promise<void> {
+  const existing = await db
+    .select()
+    .from(projects)
+    .where(or(eq(projects.id, entry.id), eq(projects.slug, entry.slug)))
+    .limit(1);
+
+  const row = existing[0];
+  if (!row) {
+    await db.insert(projects).values({
+      id: entry.id,
+      slug: entry.slug,
+      displayName: entry.display_name,
+      repoPath: entry.repo_path ?? null,
+    });
+    return;
+  }
+
+  await db
+    .update(projects)
+    .set({
+      slug: entry.slug,
+      displayName: entry.display_name,
+      repoPath: entry.repo_path ?? null,
+    })
+    .where(eq(projects.id, row.id));
+}
+
+export async function seedProjects(
+  db: Db,
+  env: ProjectSeedEnv = process.env,
+): Promise<void> {
+  const projectsJson = env.SPRINO_PROJECTS_JSON;
+  const projectId = env.SPRINO_DEFAULT_PROJECT_ID;
+  const projectSlug = env.SPRINO_DEFAULT_PROJECT_SLUG;
 
   if (projectsJson) {
     const parsed = JSON.parse(projectsJson) as ProjectEntry[];
     for (const p of parsed) {
-      await db
-        .insert(projects)
-        .values({
-          id: p.id,
-          slug: p.slug,
-          displayName: p.display_name,
-          repoPath: p.repo_path ?? null,
-        })
-        .onConflictDoUpdate({
-          target: projects.id,
-          set: {
-            slug: p.slug,
-            displayName: p.display_name,
-            repoPath: p.repo_path ?? null,
-          },
-        });
+      await upsertSeedProject(db, p);
     }
     console.log(`Seeded ${parsed.length} project(s) from SPRINO_PROJECTS_JSON`);
   } else if (projectId && projectSlug) {
     const displayName =
-      process.env.SPRINO_DEFAULT_PROJECT_DISPLAY_NAME?.trim() || 'Sprino';
-    await db
-      .insert(projects)
-      .values({
-        id: projectId,
-        slug: projectSlug,
-        displayName,
-        repoPath: null,
-      })
-      .onConflictDoNothing({ target: projects.id });
+      env.SPRINO_DEFAULT_PROJECT_DISPLAY_NAME?.trim() || 'Sprino';
+    await upsertSeedProject(db, {
+      id: projectId,
+      slug: projectSlug,
+      display_name: displayName,
+      repo_path: null,
+    });
     console.log(`Seeded default project: ${projectSlug} (${projectId})`);
   }
 }
@@ -79,13 +99,15 @@ async function main(): Promise<void> {
     `Seeded actors: imported=${result.importedActors} new_tokens=${result.newTokens} revoked_removed=${result.revokedRemoved}`,
   );
 
-  await seedProjects();
+  await seedProjects(db);
 
   await closeDb();
   console.log('Done.');
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Migration failed:', err);
+    process.exit(1);
+  });
+}

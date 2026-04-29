@@ -197,16 +197,28 @@ its caller arrived via HTTP or MCP.
   [Section 10b](#10b-actor-lifecycle-v009) for the full reconciliation
   contract and recovery story.
 - The middleware attaches the resolved `actor` to the Hono request
-  context. The HTTP/MCP adapters then pass `actorId` explicitly into
-  `service/*` functions for `created_by` fields and the event log's
-  actor reference; the service layer is transport-agnostic and does
-  not depend on Hono context.
+  context, including the actor's internal `role` (`admin` | `member`).
+  The HTTP/MCP adapters then pass `actorId` explicitly into `service/*`
+  functions for `created_by` fields and the event log's actor reference;
+  the service layer is transport-agnostic and does not depend on Hono
+  context.
+- Actor-admin verbs (`actor.register`, `actor.revoke_token`, and
+  Sprino-only `rotate_token`) are authorized in the service layer via a
+  centralized `authorization.ts` helper. Current Phase A policy is:
+  only `human` actors with `role='admin'` may manage actor credentials.
+  Adapters only translate the resulting forbidden error into HTTP / MCP
+  wire shapes.
 - For SSE, browsers can't set custom headers on `EventSource`, so we issue
   short-lived **stream tickets** signed with HMAC-SHA256 over
   `${actorId}.${projectId}.${exp}`. The issued ticket is the dotted string
   `<actor_id>.<project_id>.<exp_ms>.<base64url(signature)>`. Clients
   exchange a Bearer token for a ticket, then pass that full string as the
   `ticket` query param.
+- SSE ticket verification is necessary but not sufficient: on both the
+  initial handshake and the live poll loop, the server re-checks that the
+  ticket-bound actor still has an active credential. Revoking an actor's
+  bearer token therefore invalidates both stale tickets and already-open
+  event streams.
 
 ### Realtime
 

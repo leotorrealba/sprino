@@ -6,6 +6,29 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
+### Added
+- Internal actor roles (`admin` / `member`) are now persisted on `actors`,
+  hydrated through auth middleware, and enforced for actor-admin verbs in
+  both HTTP and MCP transports.
+- Added dedicated regression coverage for actor-admin authorization, the
+  last-admin concurrent revoke race, project seed slug collisions, and SSE
+  credential revocation behavior.
+
+### Changed
+- `actor.register`, `actor.revoke_token`, and Sprino-only
+  `rotate_token` now authorize in the service layer through one shared
+  policy kernel instead of relying on transport-specific behavior.
+- Last-admin revoke protection now serializes on the active-human lock set,
+  preventing two concurrent revokes from dropping the system to zero active
+  human credentials.
+- Project seeding in `db:migrate` now merges deterministically by existing
+  project identity (`id` or `slug`) so repeated runs do not fail when an
+  incoming seed changes project ids.
+
+### Fixed
+- Revoking an actor credential now invalidates stale SSE tickets and
+  terminates already-open SSE streams on the next poll cycle.
+
 ## [v0.0.9] — 2026-04-29
 
 ### Added (Phase 9 — Actor lifecycle)
