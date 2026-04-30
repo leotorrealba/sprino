@@ -424,6 +424,13 @@ export const ActorGetReqSchema = z
   .strict();
 export type ActorGetReq = z.infer<typeof ActorGetReqSchema>;
 
+export const ActorHeartbeatReqSchema = z
+  .object({
+    actor_id: uuid,
+  })
+  .strict();
+export type ActorHeartbeatReq = z.infer<typeof ActorHeartbeatReqSchema>;
+
 export const ActorRevokeTokenReqSchema = z
   .object({
     operation_id: uuid,
@@ -445,6 +452,9 @@ export type ActorListRes = z.infer<typeof ActorListResSchema>;
 
 export const ActorGetResSchema = z.object({ actor: ActorSchema });
 export type ActorGetRes = z.infer<typeof ActorGetResSchema>;
+
+export const ActorHeartbeatResSchema = z.object({ actor: ActorSchema });
+export type ActorHeartbeatRes = z.infer<typeof ActorHeartbeatResSchema>;
 
 export const ActorRevokeTokenResSchema = z.object({ actor: ActorSchema });
 export type ActorRevokeTokenRes = z.infer<typeof ActorRevokeTokenResSchema>;

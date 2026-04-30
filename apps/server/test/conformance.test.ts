@@ -351,7 +351,7 @@ describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
 });
 
 describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () => {
-  it('tools/list returns the Tessera task verbs and advertises actor.register agent fields', async () => {
+  it('tools/list returns the Tessera verbs and advertises actor lifecycle fields', async () => {
     const app = buildTestApp();
     const resp = await app.fetch(
       new Request(
@@ -366,6 +366,7 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
       'sprino.actor.get',
+      'sprino.actor.heartbeat',
       'sprino.actor.list',
       'sprino.actor.register',
       'sprino.actor.revoke_token',
