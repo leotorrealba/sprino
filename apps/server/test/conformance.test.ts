@@ -871,6 +871,8 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
 
   it('rejects agent register requests missing required agent fields', async () => {
     const app = buildTestApp();
+    // This fixture still carries the legacy filename, but its current
+    // payload/response pair asserts the missing-agent-fields validation path.
     const req = readFixture(
       'actor-register-invalid-kind.req.json',
     ) as Record<string, unknown>;
