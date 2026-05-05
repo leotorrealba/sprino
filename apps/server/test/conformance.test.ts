@@ -21,6 +21,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
 import { projects } from '../src/db/schema.ts';
+import {
+  ActorRegisterReqSchema,
+  type ActorRegisterReq,
+} from '../src/domain/index.ts';
 import { transitionAgentLifecycle } from '../src/service/actors.ts';
 import {
   FIXTURE_ACTOR_ID,
@@ -83,6 +87,14 @@ function bearerForToken(
 function expectNoAgentLifecycleFields(record: Record<string, unknown>): void {
   for (const field of INTERNAL_AGENT_LIFECYCLE_FIELDS) {
     expect(record).not.toHaveProperty(field);
+  }
+}
+
+function expectAgentRegisterReq(
+  req: ActorRegisterReq,
+): asserts req is Extract<ActorRegisterReq, { kind: 'agent' }> {
+  if (req.kind !== 'agent') {
+    throw new Error('Expected agent registration fixture');
   }
 }
 
@@ -339,7 +351,7 @@ describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
 });
 
 describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () => {
-  it('tools/list returns the Tessera task verbs and week 2 project verbs', async () => {
+  it('tools/list exposes the heartbeat verb and actor.register distinguishes agent-specific required fields', async () => {
     const app = buildTestApp();
     const resp = await app.fetch(
       new Request(
@@ -354,6 +366,7 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
       'sprino.actor.get',
+      'sprino.actor.heartbeat',
       'sprino.actor.list',
       'sprino.actor.register',
       'sprino.actor.revoke_token',
@@ -363,6 +376,49 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       'sprino.task.get',
       'sprino.task.update_status',
     ]);
+
+    const actorRegister = body.result.tools.find(
+      (tool) => tool.name === 'sprino.actor.register',
+    ) as
+      | {
+          name: string;
+          description: string;
+          inputSchema: {
+            oneOf: Array<{
+              required: string[];
+              properties: Record<string, { const?: string; type?: unknown }>;
+            }>;
+          };
+        }
+      | undefined;
+    expect(actorRegister).toBeDefined();
+    expect(actorRegister?.description).toContain("kind='agent'");
+    expect(actorRegister?.inputSchema.oneOf).toHaveLength(2);
+    expect(actorRegister?.inputSchema.oneOf[0]).toMatchObject({
+      required: ['operation_id', 'display_name', 'kind'],
+      properties: {
+        kind: { const: 'human' },
+      },
+    });
+    expect(actorRegister?.inputSchema.oneOf[1]).toMatchObject({
+      required: [
+        'operation_id',
+        'display_name',
+        'kind',
+        'agent_runtime',
+        'parent_actor_id',
+      ],
+      properties: {
+        kind: { const: 'agent' },
+        agent_runtime: {
+          type: 'string',
+          maxLength: 120,
+        },
+        parent_actor_id: {
+          type: 'string',
+        },
+      },
+    });
   });
 
   it('tools/call sprino.task.create produces an identical task to the REST adapter', async () => {
@@ -814,24 +870,316 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     expect(replayRevokeJson.actor.id).toBe(mintedActorId);
   });
 
-  it('rejects register with kind=agent (v0.1.2 humans-only)', async () => {
+  it('rejects agent register requests missing required agent fields', async () => {
+    const app = buildTestApp();
+    // This fixture still carries the legacy filename, but its current
+    // payload/response pair asserts the missing-agent-fields validation path.
+    const req = readFixture(
+      'actor-register-invalid-kind.req.json',
+    ) as Record<string, unknown>;
+    const expected = readFixture(
+      'actor-register-invalid-kind.res.json',
+    ) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+
+    const r = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(r.status).toBe(expected._error.status);
+    const body = (await r.json()) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+    expect(body._error.status).toBe(expected._error.status);
+    expect(body._error.code).toBe(expected._error.code);
+    expect(body._error.details.field).toBe(expected._error.details.field);
+    expect(body._error.details.reason).toBe(expected._error.details.reason);
+  });
+
+  it('maps malformed MCP actor.register requests to JSON-RPC invalid params', async () => {
     const app = buildTestApp();
     const req = readFixture(
       'actor-register-invalid-kind.req.json',
     ) as Record<string, unknown>;
+
+    const r = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 132,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.register',
+            arguments: req,
+          },
+        }),
+      ),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      jsonrpc: string;
+      id: number;
+      error: {
+        code: number;
+        message: string;
+        data: Array<{ path?: string[]; message?: string }>;
+      };
+    };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.id).toBe(132);
+    expect(body.error.code).toBe(-32602);
+    expect(body.error.message).toBe('Invalid params');
+    expect(body.error.data[0]?.path).toEqual(['agent_runtime']);
+    expect(body.error.data[0]?.message).toBe(
+      'Agent registration requires both `agent_runtime` and `parent_actor_id`.',
+    );
+  });
+
+  it('accepts complete agent register requests over HTTP and MCP with replay redaction parity', async () => {
+    const app = buildTestApp();
+    const parsedReq = ActorRegisterReqSchema.parse(
+      readFixture('actor-register-agent-happy.req.json'),
+    );
+
+    expect(parsedReq.kind).toBe('agent');
+    expectAgentRegisterReq(parsedReq);
+    const req = parsedReq;
+
     const r = await app.fetch(
       new Request('http://test/api/actors', bearer(req)),
     );
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(201);
     const body = (await r.json()) as {
-      _error: { status: number; code: string; details: { field: string; reason: string } };
+      actor: Record<string, unknown>;
+      token?: string;
     };
-    expect(body._error.status).toBe(400);
-    expect(body._error.code).toBe('validation_error');
-    expect(body._error.details.field).toBe('kind');
-    expect(body._error.details.reason).toBe(
-      'Only `human` is accepted in v0.1.2.',
+    expect(body.actor.kind).toBe('agent');
+    expect(body.actor.display_name).toBe(req.display_name);
+    expect(body.actor.agent_runtime).toBe(req.agent_runtime);
+    expect(body.actor.parent_actor_id).toBe(req.parent_actor_id);
+    expect(body.actor.id).toMatch(UUID_RE);
+    expect(body.actor.created_at).toMatch(ISO_DATETIME_RE);
+    expect(typeof body.token).toBe('string');
+    expect(body.token!.length).toBeGreaterThanOrEqual(32);
+
+    const agentMeResp = await app.fetch(
+      new Request(`http://test/api/actors/${body.actor.id as string}`, {
+        headers: { authorization: `Bearer ${body.token!}` },
+      }),
     );
+    expect(agentMeResp.status).toBe(200);
+
+    const replay = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(replay.status).toBe(201);
+    const replayBody = (await replay.json()) as { actor: Record<string, unknown> };
+    expect(replayBody.actor).toEqual(body.actor);
+    expect('token' in replayBody).toBe(false);
+
+    const mcpReq = {
+      ...req,
+      operation_id: '018c3e7a-0005-7000-8000-000000000130',
+      display_name: 'Claude Code MCP Session',
+    };
+    const mcpResp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 130,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.register',
+            arguments: mcpReq,
+          },
+        }),
+      ),
+    );
+    expect(mcpResp.status).toBe(200);
+    const mcpBody = (await mcpResp.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: {
+          actor: Record<string, unknown>;
+          token?: string;
+        };
+      };
+    };
+    expect(mcpBody.result.structuredContent.actor.kind).toBe('agent');
+    expect(mcpBody.result.structuredContent.actor.display_name).toBe(
+      mcpReq.display_name,
+    );
+    expect(mcpBody.result.structuredContent.actor.agent_runtime).toBe(
+      mcpReq.agent_runtime,
+    );
+    expect(mcpBody.result.structuredContent.actor.parent_actor_id).toBe(
+      mcpReq.parent_actor_id,
+    );
+    expect(mcpBody.result.structuredContent.actor.id).toMatch(UUID_RE);
+    expect(mcpBody.result.structuredContent.actor.created_at).toMatch(
+      ISO_DATETIME_RE,
+    );
+    expect(typeof mcpBody.result.structuredContent.token).toBe('string');
+    expect(
+      mcpBody.result.structuredContent.token!.length,
+    ).toBeGreaterThanOrEqual(32);
+    expect(mcpBody.result.content[0]?.type).toBe('text');
+    expect(mcpBody.result.content[0]?.text).toBe(
+      JSON.stringify(mcpBody.result.structuredContent),
+    );
+
+    const mcpReplayResp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 131,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.register',
+            arguments: mcpReq,
+          },
+        }),
+      ),
+    );
+    expect(mcpReplayResp.status).toBe(200);
+    const mcpReplayBody = (await mcpReplayResp.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: { actor: Record<string, unknown> };
+      };
+    };
+    expect(mcpReplayBody.result.structuredContent.actor).toEqual(
+      mcpBody.result.structuredContent.actor,
+    );
+    expect('token' in mcpReplayBody.result.structuredContent).toBe(false);
+    expect(mcpReplayBody.result.content[0]?.type).toBe('text');
+    expect(mcpReplayBody.result.content[0]?.text).toBe(
+      JSON.stringify(mcpReplayBody.result.structuredContent),
+    );
+    expect(mcpReplayBody.result.content[0]?.text).not.toContain('token');
+  });
+
+  it('maps service-layer parent validation failures for actor.register to JSON-RPC invalid params', async () => {
+    const app = buildTestApp();
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000132',
+      display_name: 'Claude Code MCP Orphan Agent',
+      kind: 'agent',
+      agent_runtime: 'claude-code',
+      parent_actor_id: '018c3e7a-ffff-7000-8000-000000000001',
+    };
+
+    const r = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 133,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.register',
+            arguments: req,
+          },
+        }),
+      ),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      jsonrpc: string;
+      id: number;
+      error: {
+        code: number;
+        message: string;
+        data: { field: string; reason: string };
+      };
+    };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.id).toBe(133);
+    expect(body.error.code).toBe(-32602);
+    expect(body.error.message).toBe('validation_error');
+    expect(body.error.data).toEqual({
+      field: 'parent_actor_id',
+      reason: 'Parent actor does not exist.',
+    });
+  });
+
+  it('maps non-human parent validation failures for actor.register over HTTP and JSON-RPC', async () => {
+    const app = buildTestApp();
+    const parent = await seedDbActor({
+      displayName: 'Nested Agent Parent',
+      kind: 'agent',
+      agentRuntime: 'claude-code',
+      parentActorId: FIXTURE_ACTOR_ID,
+    });
+    const req = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000134',
+      display_name: 'Claude Code Nested Agent',
+      kind: 'agent' as const,
+      agent_runtime: 'claude-code',
+      parent_actor_id: parent.actorId,
+    };
+
+    const httpResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(httpResp.status).toBe(400);
+    const httpBody = (await httpResp.json()) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+    expect(httpBody._error.status).toBe(400);
+    expect(httpBody._error.code).toBe('validation_error');
+    expect(httpBody._error.details).toEqual({
+      field: 'parent_actor_id',
+      reason: 'Parent actor must reference a human actor.',
+    });
+
+    const mcpResp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 134,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.register',
+            arguments: req,
+          },
+        }),
+      ),
+    );
+    expect(mcpResp.status).toBe(200);
+    const mcpBody = (await mcpResp.json()) as {
+      jsonrpc: string;
+      id: number;
+      error: {
+        code: number;
+        message: string;
+        data: { field: string; reason: string };
+      };
+    };
+    expect(mcpBody.jsonrpc).toBe('2.0');
+    expect(mcpBody.id).toBe(134);
+    expect(mcpBody.error.code).toBe(-32602);
+    expect(mcpBody.error.message).toBe('validation_error');
+    expect(mcpBody.error.data).toEqual({
+      field: 'parent_actor_id',
+      reason: 'Parent actor must reference a human actor.',
+    });
   });
 
   it('rejects register with missing display_name', async () => {

@@ -4,7 +4,7 @@
  * Actor lifecycle service — Tessera v0.1.2 verbs + Sprino-only rotate.
  *
  * Verbs:
- *   actor.register     (humans only in v0.1.2; idempotent via operation_id)
+ *   actor.register     (human and agent actors in v0.1.2; idempotent via operation_id)
  *   actor.list         (read; optional kind filter)
  *   actor.get          (read by actor_id)
  *   actor.revoke_token (idempotent; flips revoked_at on active tokens)
@@ -190,6 +190,48 @@ function isUniqueViolation(err: unknown): boolean {
   return e.code === '23505';
 }
 
+type RegisterActorInsert = {
+  kind: ActorRow['kind'];
+  displayName: string;
+  agentRuntime: string | null;
+  parentActorId: string | null;
+};
+
+async function buildRegisterActorInsert(
+  db: Db,
+  req: ActorRegisterReq,
+): Promise<RegisterActorInsert> {
+  if (req.kind === 'human') {
+    return {
+      kind: 'human',
+      displayName: req.display_name,
+      agentRuntime: null,
+      parentActorId: null,
+    };
+  }
+
+  const parent = await fetchActorRow(db, req.parent_actor_id);
+  if (!parent) {
+    throw new ActorValidationError(
+      'parent_actor_id',
+      'Parent actor does not exist.',
+    );
+  }
+  if (parent.kind !== 'human') {
+    throw new ActorValidationError(
+      'parent_actor_id',
+      'Parent actor must reference a human actor.',
+    );
+  }
+
+  return {
+    kind: 'agent',
+    displayName: req.display_name,
+    agentRuntime: req.agent_runtime,
+    parentActorId: req.parent_actor_id,
+  };
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // register
 // ────────────────────────────────────────────────────────────────────────
@@ -206,7 +248,7 @@ export type ActorRegisterResponse =
   | ActorRegisterReplayResponse;
 
 /**
- * Mint a new human actor and return the plaintext credential exactly once.
+ * Mint a new actor and return the plaintext credential exactly once.
  *
  * Idempotency redaction (load-bearing — see actor-register-operation-replay
  * fixture in tessera/conformance/):
@@ -223,15 +265,6 @@ export async function registerActor(
 ): Promise<ActorRegisterResponse> {
   await assertCallerCanManageActors(db, args.callerId);
 
-  // v0.1.2 humans-only. Zod already enforces this; defensive guard so a
-  // stray adapter that forgot to validate can't slip an agent past us.
-  if (args.req.kind !== 'human') {
-    throw new ActorValidationError(
-      'kind',
-      'Only `human` is accepted in v0.1.2.',
-    );
-  }
-
   const requestHash = hashRequest(args.req);
 
   const cached = await checkIdempotency(
@@ -240,6 +273,8 @@ export async function registerActor(
     requestHash,
   );
   if (cached) return cached as ActorRegisterReplayResponse;
+
+  const actorValues = await buildRegisterActorInsert(db, args.req);
 
   const token = mintToken();
   const tokenHash = hashToken(token);
@@ -252,10 +287,10 @@ export async function registerActor(
         .insert(actors)
         .values({
           id: actorId,
-          kind: 'human',
-          displayName: args.req.display_name,
-          agentRuntime: null,
-          parentActorId: null,
+          kind: actorValues.kind,
+          displayName: actorValues.displayName,
+          agentRuntime: actorValues.agentRuntime,
+          parentActorId: actorValues.parentActorId,
           source: 'db',
           createdAt: now,
         })

@@ -32,8 +32,13 @@ import {
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
+  ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
 } from '../../domain/index.ts';
+import {
+  AgentHeartbeatForbiddenError,
+  heartbeatAgent,
+} from '../../service/agent-lifecycle.ts';
 import {
   ProjectNotFoundError,
   getProject,
@@ -52,6 +57,7 @@ import {
 } from '../../service/idempotency.ts';
 import {
   ActorNotFoundError,
+  ActorLifecycleTransitionError,
   ActorValidationError,
   EnvActorImmutableError,
   LastAdminProtectedError,
@@ -152,16 +158,38 @@ const TOOL_DEFINITIONS = [
   {
     name: 'sprino.actor.register',
     description:
-      'Register a new human actor (Tessera v0.1.2). Idempotent via operation_id (UUIDv7). Returns {actor, token} on first call; replay returns {actor} only — plaintext token is shown exactly once.',
+      "Register a new actor (Tessera v0.1.2). Idempotent via operation_id (UUIDv7). Returns {actor, token} on first call; replay returns {actor} only and never replays the plaintext token. Use kind='human' for people. Use kind='agent' for agent sessions; agent registrations must also provide agent_runtime and parent_actor_id.",
     inputSchema: {
-      type: 'object',
-      required: ['operation_id', 'display_name', 'kind'],
-      additionalProperties: false,
-      properties: {
-        operation_id: { type: 'string', format: 'uuid' },
-        display_name: { type: 'string', minLength: 1, maxLength: 200 },
-        kind: { type: 'string', enum: ['human'] },
-      },
+      oneOf: [
+        {
+          type: 'object',
+          required: ['operation_id', 'display_name', 'kind'],
+          additionalProperties: false,
+          properties: {
+            operation_id: { type: 'string', format: 'uuid' },
+            display_name: { type: 'string', minLength: 1, maxLength: 200 },
+            kind: { const: 'human' },
+          },
+        },
+        {
+          type: 'object',
+          required: [
+            'operation_id',
+            'display_name',
+            'kind',
+            'agent_runtime',
+            'parent_actor_id',
+          ],
+          additionalProperties: false,
+          properties: {
+            operation_id: { type: 'string', format: 'uuid' },
+            display_name: { type: 'string', minLength: 1, maxLength: 200 },
+            kind: { const: 'agent' },
+            agent_runtime: { type: 'string', minLength: 1, maxLength: 120 },
+            parent_actor_id: { type: 'string', format: 'uuid' },
+          },
+        },
+      ],
     },
   },
   {
@@ -179,6 +207,19 @@ const TOOL_DEFINITIONS = [
   {
     name: 'sprino.actor.get',
     description: 'Fetch an actor by actor_id (Tessera v0.1.2).',
+    inputSchema: {
+      type: 'object',
+      required: ['actor_id'],
+      additionalProperties: false,
+      properties: {
+        actor_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.actor.heartbeat',
+    description:
+      'Record a liveness heartbeat for the authenticated agent actor. The actor_id must match the caller token.',
     inputSchema: {
       type: 'object',
       required: ['actor_id'],
@@ -308,6 +349,11 @@ async function callTool(
       const res = await getActor(db, { req });
       return wrapToolResult(res);
     }
+    case 'sprino.actor.heartbeat': {
+      const req = ActorHeartbeatReqSchema.parse(args);
+      const res = await heartbeatAgent(db, { req, callerId: actor.id });
+      return wrapToolResult(res);
+    }
     case 'sprino.actor.revoke_token': {
       const req = ActorRevokeTokenReqSchema.parse(args);
       const res = await revokeToken(db, { req, callerId: actor.id });
@@ -394,6 +440,13 @@ function translateError(
       reason: err.reason,
     });
   }
+  if (err instanceof AgentHeartbeatForbiddenError) {
+    return rpcError(id, -32003, 'forbidden', {
+      actor_id: err.actorId,
+      target_actor_id: err.targetActorId,
+      reason: 'actor_mismatch',
+    });
+  }
   if (err instanceof LastAdminProtectedError) {
     return rpcError(id, -32012, 'last_admin_protected', {
       actor_id: err.actorId,
@@ -402,6 +455,15 @@ function translateError(
   if (err instanceof EnvActorImmutableError) {
     return rpcError(id, -32013, 'operation_unsupported', {
       actor_id: err.actorId,
+    });
+  }
+  if (err instanceof ActorLifecycleTransitionError) {
+    return rpcError(id, -32009, err.code, {
+      actor_id: err.actorId,
+      transition: err.transition,
+      ...(err.fromState ? { from_state: err.fromState } : {}),
+      ...(err.toState ? { to_state: err.toState } : {}),
+      ...(err.actorKind ? { actor_kind: err.actorKind } : {}),
     });
   }
   console.error('Unhandled MCP error:', err);

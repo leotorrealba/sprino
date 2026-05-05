@@ -265,7 +265,7 @@ export type AgentListRes = z.infer<typeof AgentListResSchema>;
 // Append-only — Tessera v0.1.2 actor lifecycle.
 // ────────────────────────────────────────────────────────────────────────
 
-const ActorRegisterReqShape = z.object({
+const ActorRegisterBaseReqShape = z.object({
   // Use distinct error messages so ZodError → ActorValidationError mapping
   // (in service/actors.ts) renders the exact strings the conformance
   // fixtures assert on.
@@ -277,27 +277,138 @@ const ActorRegisterReqShape = z.object({
     })
     .min(1, { message: 'Required field is missing.' })
     .max(200),
+});
+
+const AGENT_REGISTER_FIELDS_REQUIRED =
+  'Agent registration requires both `agent_runtime` and `parent_actor_id`.';
+const HUMAN_REGISTER_AGENT_FIELDS_REJECTED =
+  'Agent-only fields are not accepted for human registration.';
+const ACTOR_KIND_UNSUPPORTED =
+  'Only `human` or `agent` is accepted.';
+const AGENT_RUNTIME_MAX_LENGTH = 120;
+
+export type ActorRegisterReq =
+  | {
+      operation_id: string;
+      display_name: string;
+      kind: 'human';
+    }
+  | {
+      operation_id: string;
+      display_name: string;
+      kind: 'agent';
+      agent_runtime: string;
+      parent_actor_id: string;
+    };
+
+export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
   kind: z
     .string({
       required_error: 'Required field is missing.',
     })
-    .refine((v) => v === 'human', {
-      message: 'Only `human` is accepted in v0.1.2.',
+    .refine((kind) => kind === 'human' || kind === 'agent', {
+      message: ACTOR_KIND_UNSUPPORTED,
     }),
-});
+  agent_runtime: z.unknown().optional(),
+  parent_actor_id: z.unknown().optional(),
+})
+  .strict()
+  .superRefine((req, ctx) => {
+    if (
+      req.kind === 'human' &&
+      (req.agent_runtime !== undefined ||
+        req.parent_actor_id !== undefined)
+    ) {
+      const path =
+        req.agent_runtime === undefined &&
+        req.parent_actor_id !== undefined
+          ? ['parent_actor_id']
+          : ['agent_runtime'];
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: HUMAN_REGISTER_AGENT_FIELDS_REJECTED,
+      });
+      return;
+    }
 
-export const ActorRegisterReqSchema = ActorRegisterReqShape.strict().transform(
-  (v) => ({
-    operation_id: v.operation_id,
-    display_name: v.display_name,
-    kind: v.kind as 'human',
-  }),
-);
-export type ActorRegisterReq = {
-  operation_id: string;
-  display_name: string;
-  kind: 'human';
-};
+    if (
+      req.kind === 'agent' &&
+      (req.agent_runtime === undefined ||
+        req.parent_actor_id === undefined)
+    ) {
+      const path =
+        req.agent_runtime !== undefined &&
+        req.parent_actor_id === undefined
+          ? ['parent_actor_id']
+          : ['agent_runtime'];
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: AGENT_REGISTER_FIELDS_REQUIRED,
+      });
+      return;
+    }
+
+    if (req.kind !== 'agent') {
+      return;
+    }
+
+    if (typeof req.agent_runtime !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: 'Must be a string.',
+      });
+    } else if (req.agent_runtime.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: 'Required field is missing.',
+      });
+    } else if (req.agent_runtime.length > AGENT_RUNTIME_MAX_LENGTH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['agent_runtime'],
+        message: `Must be at most ${AGENT_RUNTIME_MAX_LENGTH} characters.`,
+      });
+    }
+
+    if (typeof req.parent_actor_id !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['parent_actor_id'],
+        message: 'Must be a string.',
+      });
+    } else {
+      const parentActorIdResult = uuid.safeParse(req.parent_actor_id);
+      if (!parentActorIdResult.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['parent_actor_id'],
+          message:
+            parentActorIdResult.error.issues[0]?.message ?? 'Invalid uuid',
+        });
+      }
+    }
+  })
+  .transform((req): ActorRegisterReq => {
+    if (req.kind === 'human') {
+      return {
+        operation_id: req.operation_id,
+        display_name: req.display_name,
+        kind: req.kind,
+      };
+    }
+
+    return {
+      operation_id: req.operation_id,
+      display_name: req.display_name,
+      kind: req.kind,
+      agent_runtime: req.agent_runtime as string,
+      parent_actor_id: req.parent_actor_id as string,
+    };
+  });
 
 export const ActorListReqSchema = z
   .object({
@@ -312,6 +423,13 @@ export const ActorGetReqSchema = z
   })
   .strict();
 export type ActorGetReq = z.infer<typeof ActorGetReqSchema>;
+
+export const ActorHeartbeatReqSchema = z
+  .object({
+    actor_id: uuid,
+  })
+  .strict();
+export type ActorHeartbeatReq = z.infer<typeof ActorHeartbeatReqSchema>;
 
 export const ActorRevokeTokenReqSchema = z
   .object({
@@ -334,6 +452,9 @@ export type ActorListRes = z.infer<typeof ActorListResSchema>;
 
 export const ActorGetResSchema = z.object({ actor: ActorSchema });
 export type ActorGetRes = z.infer<typeof ActorGetResSchema>;
+
+export const ActorHeartbeatResSchema = z.object({ actor: ActorSchema });
+export type ActorHeartbeatRes = z.infer<typeof ActorHeartbeatResSchema>;
 
 export const ActorRevokeTokenResSchema = z.object({ actor: ActorSchema });
 export type ActorRevokeTokenRes = z.infer<typeof ActorRevokeTokenResSchema>;

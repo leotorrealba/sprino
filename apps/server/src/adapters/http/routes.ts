@@ -37,6 +37,7 @@ import {
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
+  ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
 } from '../../domain/index.ts';
 import {
@@ -47,7 +48,12 @@ import {
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
 import {
+  AgentHeartbeatForbiddenError,
+  heartbeatAgent,
+} from '../../service/agent-lifecycle.ts';
+import {
   ActorNotFoundError,
+  ActorLifecycleTransitionError,
   ActorValidationError,
   ConcurrentRotationError,
   EnvActorImmutableError,
@@ -328,6 +334,24 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  api.post('/actors/:id/heartbeat', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = ActorHeartbeatReqSchema.parse({
+        ...body,
+        actor_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await heartbeatAgent(c.get('db'), {
+        req,
+        callerId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
   // Sprino-only HTTP extension. NOT a Tessera verb — operators "I lost the
   // token" recovery flow only. No idempotency: every successful call mints
   // and returns a fresh plaintext.
@@ -415,6 +439,21 @@ function actorErrorResponse(c: any, err: unknown): Response {
       403,
     );
   }
+  if (err instanceof AgentHeartbeatForbiddenError) {
+    return c.json(
+      {
+        _error: {
+          status: 403,
+          code: 'forbidden',
+          details: {
+            field: 'actor_id',
+            reason: 'Agents may heartbeat only themselves.',
+          },
+        },
+      },
+      403,
+    );
+  }
   if (err instanceof LastAdminProtectedError) {
     return c.json(
       {
@@ -456,6 +495,24 @@ function actorErrorResponse(c: any, err: unknown): Response {
           details: {
             field: 'actor_id',
             reason: 'Concurrent rotate_token detected. Retry once.',
+          },
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof ActorLifecycleTransitionError) {
+    return c.json(
+      {
+        _error: {
+          status: 409,
+          code: err.code,
+          details: {
+            field: 'actor_id',
+            reason:
+              err.code === 'actor_kind_not_agent'
+                ? 'Only agent actors support lifecycle transitions.'
+                : 'Agent lifecycle transition is not allowed from the current state.',
           },
         },
       },
