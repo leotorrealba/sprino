@@ -10,7 +10,7 @@
 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rm } from 'node:fs/promises';
+import { rm, readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -72,6 +72,26 @@ describe('attachments DB metadata (C2-P1)', () => {
     `);
     expect(result.rows.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('DB enforces pending invariant (url must be NULL when pending)', async () => {
+    const result = await db.execute<{ conname: string }>(sql`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'attachments'::regclass
+        AND contype = 'c'
+        AND conname = 'attachments_pending_invariant'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
+
+  it('DB enforces ready invariant (url and finalized_at must be non-NULL when ready)', async () => {
+    const result = await db.execute<{ conname: string }>(sql`
+      SELECT conname FROM pg_constraint
+      WHERE conrelid = 'attachments'::regclass
+        AND contype = 'c'
+        AND conname = 'attachments_ready_invariant'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -117,10 +137,9 @@ describe('LocalStorageBackend (C2-P2)', () => {
     const id = uuidv7();
     const data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]); // PNG header bytes
     await storage.write(id, data);
-    // Re-read via a second backend instance pointing at the same dir to rule
-    // out any in-memory caching.
-    const reader = new LocalStorageBackend(tmpDir);
-    expect(await reader.exists(id)).toBe(true);
+    // Read back directly from disk so any in-memory caching cannot mask corruption.
+    const stored = await readFile(join(tmpDir, id));
+    expect(stored).toEqual(data);
   });
 
   it('remove deletes the stored binary', async () => {
@@ -146,6 +165,18 @@ describe('LocalStorageBackend (C2-P2)', () => {
     await storage.write(id, Buffer.alloc(0));
     // An empty slot is not a valid upload — exists() guards against it.
     expect(await storage.exists(id)).toBe(false);
+  });
+
+  it('rejects non-UUID attachment ids to prevent path traversal', async () => {
+    await expect(storage.write('../escape', Buffer.from('x'))).rejects.toThrow(
+      'Invalid attachment id',
+    );
+    await expect(storage.exists('../escape')).rejects.toThrow(
+      'Invalid attachment id',
+    );
+    await expect(storage.remove('../escape')).rejects.toThrow(
+      'Invalid attachment id',
+    );
   });
 
   it('two distinct attachment ids do not collide in the same dir', async () => {
