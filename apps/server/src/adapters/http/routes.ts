@@ -453,8 +453,8 @@ function actorErrorResponse(c: any, err: unknown): Response {
             field: 'actor_id',
             reason:
               err.reason === 'human_required'
-                ? 'Only human admin actors may manage actors.'
-                : 'Actor role is not authorized to manage actors.',
+                ? 'Only human actors may manage actors.'
+                : 'Only admin actors may manage actors.',
           },
         },
       },
