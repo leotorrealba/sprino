@@ -2187,7 +2187,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       new Request(
         'http://test/api/tasks',
         bearer({
-          operation_id: '018c3e7a-b601-7000-8000-000000000001',
+          operation_id: '018c3e7a-b602-7000-8000-000000000001',
           project_id: FIXTURE_PROJECT_ID,
           title: 'Long-running task with extensive agent context',
         }),
@@ -2206,7 +2206,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
           `http://test/api/tasks/${taskId}/status`,
           bearer(
             {
-              operation_id: `018c3e7a-b601-7000-8000-${i.toString(16).padStart(12, '0')}`,
+              operation_id: `018c3e7a-b603-7000-8000-${i.toString(16).padStart(12, '0')}`,
               status: next,
               if_match: i + 1,
               notes: heavyNotes,
