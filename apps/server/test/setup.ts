@@ -30,7 +30,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { tokenAuth } from '../src/auth/middleware.ts';
 import type { AuthEnv } from '../src/auth/middleware.ts';
 import { closeDb, db } from '../src/db/client.ts';
-import { actors, actorTokens, projects } from '../src/db/schema.ts';
+import { actors, actorTokens, projects, tasks } from '../src/db/schema.ts';
 import { seedFromEnv } from '../src/db/seed.ts';
 import { buildHttpRoutes } from '../src/adapters/http/routes.ts';
 import { sseHandler } from '../src/adapters/http/sse.ts';
@@ -44,6 +44,8 @@ export const FIXTURE_PROJECT_SLUG = 'sprino';
 export const FIXTURE_TOKEN = 'test-leo-token';
 export const FIXTURE_AGENT_ID = '018c3e7a-0001-7000-8000-0000000000a1';
 export const FIXTURE_AGENT_TOKEN = 'test-agent-token';
+// Attachment conformance fixtures reference this task id.
+export const FIXTURE_TASK_ID = '018c3e7a-0003-7000-8000-000000000001';
 
 export function buildTestApp(): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
@@ -72,9 +74,11 @@ export function buildTestApp(): Hono<AuthEnv> {
 
 export async function resetDb(): Promise<void> {
   // actor_tokens MUST come before actors in the truncate list — even with
-  // CASCADE, listing both is defensive against future FKs.
+  // CASCADE, listing both is defensive against future FKs. attachments is
+  // listed explicitly so its sequence resets cleanly even if FK CASCADE
+  // ordering differs across Postgres versions.
   await db.execute(
-    sql`TRUNCATE TABLE events, operations, tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE attachments, events, operations, tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
   );
 
   // Re-import env actors (FIXTURE_ACTOR_ID + agent) into actors +
@@ -118,6 +122,19 @@ export async function seedDbActor(args: {
     source: 'db',
   });
   return { actorId, token };
+}
+
+export async function seedFixtureTask(
+  taskId: string = FIXTURE_TASK_ID,
+): Promise<void> {
+  await db.insert(tasks).values({
+    id: taskId,
+    projectId: FIXTURE_PROJECT_ID,
+    title: 'Fixture task for attachment conformance',
+    description: '',
+    status: 'todo',
+    createdBy: FIXTURE_ACTOR_ID,
+  });
 }
 
 beforeEach(async () => {

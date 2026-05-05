@@ -466,3 +466,74 @@ export type ActorHeartbeatRes = z.infer<typeof ActorHeartbeatResSchema>;
 
 export const ActorRevokeTokenResSchema = z.object({ actor: ActorSchema });
 export type ActorRevokeTokenRes = z.infer<typeof ActorRevokeTokenResSchema>;
+
+// ────────────────────────────────────────────────────────────────────────
+// Attachment resource + verbs (Tessera v0.1.4)
+// ────────────────────────────────────────────────────────────────────────
+
+export const AttachmentSchema = z.object({
+  id: uuid,
+  task_id: uuid,
+  filename: z.string().min(1).max(255),
+  content_type: z.string().min(1).max(127),
+  size_bytes: z.number().int().min(1),
+  status: z.enum(['pending', 'ready']),
+  url: z.string().min(1).nullable(),
+  created_by: uuid,
+  created_at: isoDateTime,
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+
+// attachment.create_upload
+export const AttachmentCreateUploadReqSchema = z
+  .object({
+    operation_id: uuid,
+    task_id: uuid,
+    filename: z.string().min(1).max(255),
+    content_type: z.string().min(1).max(127),
+    size_bytes: z.number().int().min(1),
+  })
+  .strict();
+export type AttachmentCreateUploadReq = z.infer<typeof AttachmentCreateUploadReqSchema>;
+
+export const AttachmentCreateUploadResSchema = z.object({
+  attachment: AttachmentSchema,
+  upload_url: z.string().min(1),
+});
+export type AttachmentCreateUploadRes = z.infer<typeof AttachmentCreateUploadResSchema>;
+
+// attachment.finalize
+export const AttachmentFinalizeReqSchema = z
+  .object({
+    operation_id: uuid,
+    attachment_id: uuid,
+  })
+  .strict();
+export type AttachmentFinalizeReq = z.infer<typeof AttachmentFinalizeReqSchema>;
+
+export const AttachmentFinalizeResSchema = z.object({
+  attachment: AttachmentSchema,
+});
+export type AttachmentFinalizeRes = z.infer<typeof AttachmentFinalizeResSchema>;
+
+// attachment.get
+export const AttachmentGetReqSchema = z
+  .object({ attachment_id: uuid })
+  .strict();
+export type AttachmentGetReq = z.infer<typeof AttachmentGetReqSchema>;
+
+export const AttachmentGetResSchema = z.object({
+  attachment: AttachmentSchema,
+});
+export type AttachmentGetRes = z.infer<typeof AttachmentGetResSchema>;
+
+// attachment.list
+export const AttachmentListReqSchema = z
+  .object({ task_id: uuid })
+  .strict();
+export type AttachmentListReq = z.infer<typeof AttachmentListReqSchema>;
+
+export const AttachmentListResSchema = z.object({
+  attachments: z.array(AttachmentSchema),
+});
+export type AttachmentListRes = z.infer<typeof AttachmentListResSchema>;

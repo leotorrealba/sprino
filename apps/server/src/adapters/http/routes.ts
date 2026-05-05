@@ -28,6 +28,8 @@ import { Hono } from 'hono';
 import type { AuthEnv } from '../../auth/middleware.ts';
 import {
   AgentListReqSchema,
+  AttachmentCreateUploadReqSchema,
+  AttachmentFinalizeReqSchema,
   EventListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
@@ -41,6 +43,16 @@ import {
   ActorRevokeTokenReqSchema,
   ActorDeactivateReqSchema,
 } from '../../domain/index.ts';
+import {
+  AttachmentNotFoundError,
+  AttachmentNotReadyError,
+  AttachmentTaskNotFoundError,
+  createUpload,
+  finalize,
+  getAttachment,
+  listAttachments,
+} from '../../service/attachments.ts';
+import { storage } from '../../service/attachments/instance.ts';
 import {
   ProjectNotFoundError,
   getProject,
@@ -389,6 +401,79 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  // ── Tessera v0.1.4 attachment verbs ────────────────────────────────────
+  // Two-phase upload: POST /attachments → PUT /attachments/:id/upload → POST /attachments/:id/finalize.
+  // GET /attachments/:id and GET /tasks/:id/attachments are read-only.
+
+  api.post('/attachments', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AttachmentCreateUploadReqSchema.parse(body);
+      const actor = c.get('actor');
+      const res = await createUpload(c.get('db'), storage, {
+        req,
+        actorId: actor.id,
+      });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.put('/attachments/:id/upload', async (c) => {
+    try {
+      const attachmentId = c.req.param('id');
+      const data = await c.req.arrayBuffer();
+      await storage.write(attachmentId, Buffer.from(data));
+      return new Response(null, { status: 204 });
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Invalid attachment id')) {
+        return c.json({ error: 'validation_error', details: err.message }, 400);
+      }
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/attachments/:id/finalize', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AttachmentFinalizeReqSchema.parse({
+        ...body,
+        attachment_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await finalize(c.get('db'), storage, {
+        req,
+        actorId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/attachments/:id', async (c) => {
+    try {
+      const res = await getAttachment(c.get('db'), {
+        req: { attachment_id: c.req.param('id') },
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/tasks/:id/attachments', async (c) => {
+    try {
+      const res = await listAttachments(c.get('db'), {
+        req: { task_id: c.req.param('id') },
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   return api;
 }
 
@@ -640,6 +725,21 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof OperationExpiredError) {
     return c.json({ error: 'operation_expired' }, 410);
+  }
+  if (err instanceof AttachmentNotFoundError) {
+    return c.json(
+      { error: 'not_found', attachment_id: err.attachmentId },
+      404,
+    );
+  }
+  if (err instanceof AttachmentNotReadyError) {
+    return c.json(
+      { error: 'binary_not_uploaded', attachment_id: err.attachmentId },
+      409,
+    );
+  }
+  if (err instanceof AttachmentTaskNotFoundError) {
+    return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);
   }
   console.error('Unhandled error:', err);
   return c.json({ error: 'internal_error' }, 500);
