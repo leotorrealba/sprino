@@ -32,8 +32,13 @@ import {
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
+  ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
 } from '../../domain/index.ts';
+import {
+  AgentHeartbeatForbiddenError,
+  heartbeatAgent,
+} from '../../service/agent-lifecycle.ts';
 import {
   ProjectNotFoundError,
   getProject,
@@ -52,6 +57,7 @@ import {
 } from '../../service/idempotency.ts';
 import {
   ActorNotFoundError,
+  ActorLifecycleTransitionError,
   ActorValidationError,
   EnvActorImmutableError,
   LastAdminProtectedError,
@@ -211,6 +217,19 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: 'sprino.actor.heartbeat',
+    description:
+      'Record a liveness heartbeat for the authenticated agent actor. The actor_id must match the caller token.',
+    inputSchema: {
+      type: 'object',
+      required: ['actor_id'],
+      additionalProperties: false,
+      properties: {
+        actor_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
     name: 'sprino.actor.revoke_token',
     description:
       'Revoke all active credentials for an actor (Tessera v0.1.2). Idempotent at both the operation_id layer and the domain layer (revoking an actor with no active tokens is a no-op).',
@@ -330,6 +349,11 @@ async function callTool(
       const res = await getActor(db, { req });
       return wrapToolResult(res);
     }
+    case 'sprino.actor.heartbeat': {
+      const req = ActorHeartbeatReqSchema.parse(args);
+      const res = await heartbeatAgent(db, { req, callerId: actor.id });
+      return wrapToolResult(res);
+    }
     case 'sprino.actor.revoke_token': {
       const req = ActorRevokeTokenReqSchema.parse(args);
       const res = await revokeToken(db, { req, callerId: actor.id });
@@ -416,6 +440,13 @@ function translateError(
       reason: err.reason,
     });
   }
+  if (err instanceof AgentHeartbeatForbiddenError) {
+    return rpcError(id, -32003, 'forbidden', {
+      actor_id: err.actorId,
+      target_actor_id: err.targetActorId,
+      reason: 'actor_mismatch',
+    });
+  }
   if (err instanceof LastAdminProtectedError) {
     return rpcError(id, -32012, 'last_admin_protected', {
       actor_id: err.actorId,
@@ -424,6 +455,15 @@ function translateError(
   if (err instanceof EnvActorImmutableError) {
     return rpcError(id, -32013, 'operation_unsupported', {
       actor_id: err.actorId,
+    });
+  }
+  if (err instanceof ActorLifecycleTransitionError) {
+    return rpcError(id, -32009, err.code, {
+      actor_id: err.actorId,
+      transition: err.transition,
+      ...(err.fromState ? { from_state: err.fromState } : {}),
+      ...(err.toState ? { to_state: err.toState } : {}),
+      ...(err.actorKind ? { actor_kind: err.actorKind } : {}),
     });
   }
   console.error('Unhandled MCP error:', err);
