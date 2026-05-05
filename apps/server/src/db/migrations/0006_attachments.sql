@@ -34,7 +34,14 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_by    uuid                     NOT NULL REFERENCES actors(id),
   created_at    timestamp with time zone NOT NULL DEFAULT now(),
   finalized_at  timestamp with time zone,
-  deleted_at    timestamp with time zone
+  deleted_at    timestamp with time zone,
+  -- Enforce two-phase lifecycle at the DB level:
+  --   pending: url and finalized_at must both be NULL
+  --   ready:   url and finalized_at must both be non-NULL
+  CONSTRAINT attachments_pending_invariant
+    CHECK (status <> 'pending' OR (url IS NULL AND finalized_at IS NULL)),
+  CONSTRAINT attachments_ready_invariant
+    CHECK (status <> 'ready' OR (url IS NOT NULL AND finalized_at IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS attachments_task_idx

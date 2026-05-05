@@ -5,6 +5,13 @@ import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StorageBackend } from './storage.ts';
 
+// Validates UUID format to prevent path traversal via attachmentId.
+// join() accepts '..' and absolute paths, so an unvalidated id could escape
+// the storage root. UUIDs are hex + hyphens only, making this the only
+// valid attachment id shape.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * LocalStorageBackend — writes attachment binaries to the local filesystem.
  *
@@ -36,8 +43,11 @@ export class LocalStorageBackend implements StorageBackend {
     try {
       const info = await stat(this.slotPath(attachmentId));
       return info.size > 0;
-    } catch {
-      return false;
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') return false;
+      // Re-throw permission errors, I/O failures, broken mounts — these are
+      // storage outages, not "file not uploaded" situations.
+      throw err;
     }
   }
 
@@ -50,6 +60,9 @@ export class LocalStorageBackend implements StorageBackend {
   }
 
   private slotPath(attachmentId: string): string {
+    if (!UUID_RE.test(attachmentId)) {
+      throw new Error(`Invalid attachment id: ${attachmentId}`);
+    }
     return join(this.dir, attachmentId);
   }
 }
