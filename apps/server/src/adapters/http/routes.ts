@@ -39,6 +39,7 @@ import {
   ActorGetReqSchema,
   ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
+  ActorDeactivateReqSchema,
 } from '../../domain/index.ts';
 import {
   ProjectNotFoundError,
@@ -48,7 +49,9 @@ import {
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
 import {
+  AgentDeactivateForbiddenError,
   AgentHeartbeatForbiddenError,
+  deactivateAgent,
   heartbeatAgent,
 } from '../../service/agent-lifecycle.ts';
 import {
@@ -352,6 +355,25 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  api.post('/actors/:id/deactivate', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = ActorDeactivateReqSchema.parse({
+        ...body,
+        actor_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await deactivateAgent(c.get('db'), {
+        req,
+        callerId: actor.id,
+        callerKind: actor.kind,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
   // Sprino-only HTTP extension. NOT a Tessera verb — operators "I lost the
   // token" recovery flow only. No idempotency: every successful call mints
   // and returns a fresh plaintext.
@@ -448,6 +470,21 @@ function actorErrorResponse(c: any, err: unknown): Response {
           details: {
             field: 'actor_id',
             reason: 'Agents may heartbeat only themselves.',
+          },
+        },
+      },
+      403,
+    );
+  }
+  if (err instanceof AgentDeactivateForbiddenError) {
+    return c.json(
+      {
+        _error: {
+          status: 403,
+          code: 'forbidden',
+          details: {
+            field: 'actor_id',
+            reason: 'Only human actors may deactivate agent sessions.',
           },
         },
       },

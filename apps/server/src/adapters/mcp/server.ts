@@ -34,9 +34,12 @@ import {
   ActorGetReqSchema,
   ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
+  ActorDeactivateReqSchema,
 } from '../../domain/index.ts';
 import {
+  AgentDeactivateForbiddenError,
   AgentHeartbeatForbiddenError,
+  deactivateAgent,
   heartbeatAgent,
 } from '../../service/agent-lifecycle.ts';
 import {
@@ -243,6 +246,20 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.actor.deactivate',
+    description:
+      'Deactivate an agent session (Tessera v0.1.3). Caller MUST be a human actor; agents cannot deactivate sessions. Idempotent via operation_id; domain-idempotent (deactivating an already-inactive agent returns the actor envelope with no error).',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -359,6 +376,15 @@ async function callTool(
       const res = await revokeToken(db, { req, callerId: actor.id });
       return wrapToolResult(res);
     }
+    case 'sprino.actor.deactivate': {
+      const req = ActorDeactivateReqSchema.parse(args);
+      const res = await deactivateAgent(db, {
+        req,
+        callerId: actor.id,
+        callerKind: actor.kind,
+      });
+      return wrapToolResult(res);
+    }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
   }
@@ -445,6 +471,12 @@ function translateError(
       actor_id: err.actorId,
       target_actor_id: err.targetActorId,
       reason: 'actor_mismatch',
+    });
+  }
+  if (err instanceof AgentDeactivateForbiddenError) {
+    return rpcError(id, -32003, 'forbidden', {
+      actor_id: err.actorId,
+      reason: 'human_required',
     });
   }
   if (err instanceof LastAdminProtectedError) {
