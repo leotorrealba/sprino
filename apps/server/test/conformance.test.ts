@@ -1667,6 +1667,59 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     expect(mcpBody.error.message).toBe('forbidden');
   });
 
+  it('actor-deactivate operation_id conflict returns 409 when same op_id is reused with a different actor_id', async () => {
+    const app = buildTestApp();
+
+    // Register two distinct agents
+    const regReq1 = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000560',
+      display_name: 'Deactivate Conflict Agent A',
+      kind: 'agent' as const,
+      agent_runtime: 'claude-code',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+    const regReq2 = {
+      operation_id: '018c3e7a-0005-7000-8000-000000000561',
+      display_name: 'Deactivate Conflict Agent B',
+      kind: 'agent' as const,
+      agent_runtime: 'claude-code',
+      parent_actor_id: FIXTURE_ACTOR_ID,
+    };
+    const reg1 = await app.fetch(new Request('http://test/api/actors', bearer(regReq1)));
+    const reg2 = await app.fetch(new Request('http://test/api/actors', bearer(regReq2)));
+    expect(reg1.status).toBe(201);
+    expect(reg2.status).toBe(201);
+    const agentAId = ((await reg1.json()) as { actor: { id: string } }).actor.id;
+    const agentBId = ((await reg2.json()) as { actor: { id: string } }).actor.id;
+
+    const sharedOpId = '018c3e7a-0005-7000-8000-000000000562';
+
+    // First deactivation with sharedOpId targeting agent A — succeeds
+    const first = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentAId}/deactivate`,
+        bearer({ operation_id: sharedOpId, actor_id: agentAId }),
+      ),
+    );
+    expect(first.status).toBe(200);
+
+    // Same operation_id reused with a different actor_id (agent B) — must 409
+    const conflict = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentBId}/deactivate`,
+        bearer({ operation_id: sharedOpId, actor_id: agentBId }),
+      ),
+    );
+    expect(conflict.status).toBe(409);
+    const conflictBody = (await conflict.json()) as {
+      _error: { code: string; details: { field: string } };
+      cached_response: unknown;
+    };
+    expect(conflictBody._error.code).toBe('operation_id_conflict');
+    expect(conflictBody._error.details.field).toBe('operation_id');
+    expect(conflictBody.cached_response).toBeDefined();
+  });
+
   it('rejects deactivate of a human actor with validation error', async () => {
     const app = buildTestApp();
 

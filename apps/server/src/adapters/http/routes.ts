@@ -49,7 +49,6 @@ import {
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
 import {
-  AgentDeactivateForbiddenError,
   AgentHeartbeatForbiddenError,
   deactivateAgent,
   heartbeatAgent,
@@ -367,6 +366,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         req,
         callerId: actor.id,
         callerKind: actor.kind,
+        callerRole: actor.role,
       });
       return c.json(res, 200);
     } catch (err) {
@@ -470,21 +470,6 @@ function actorErrorResponse(c: any, err: unknown): Response {
           details: {
             field: 'actor_id',
             reason: 'Agents may heartbeat only themselves.',
-          },
-        },
-      },
-      403,
-    );
-  }
-  if (err instanceof AgentDeactivateForbiddenError) {
-    return c.json(
-      {
-        _error: {
-          status: 403,
-          code: 'forbidden',
-          details: {
-            field: 'actor_id',
-            reason: 'Only human actors may deactivate agent sessions.',
           },
         },
       },
