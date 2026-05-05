@@ -2069,8 +2069,25 @@ describe('Tessera B6 — fixture gap coverage', () => {
     };
     const expectedRes = readFixture(
       'actor-list-filtered-by-kind.res.json',
-    ) as { actors: Array<Record<string, unknown>> };
+    ) as { actors: Array<{ id: string; display_name: string; [k: string]: unknown }> };
     const fixtureKeys = Object.keys(expectedRes.actors[0]!);
+
+    // Seed all fixture humans so the >= length assertion is not vacuous.
+    // The fixture _meta says "actor-register-happy already ran" — we replicate
+    // that pre-condition by inserting the actors that aren't the default seed.
+    for (const fixtureActor of expectedRes.actors) {
+      if (fixtureActor.id !== FIXTURE_ACTOR_ID) {
+        await db.insert(actors).values({
+          id: fixtureActor.id,
+          kind: 'human',
+          role: 'member',
+          displayName: fixtureActor.display_name,
+          agentRuntime: null,
+          parentActorId: null,
+          source: 'db',
+        }).onConflictDoNothing();
+      }
+    }
 
     const resp = await app.fetch(
       new Request(`http://test/api/actors?kind=${req.kind}`, {
@@ -2082,6 +2099,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       actors: Array<Record<string, unknown>>;
     };
 
+    expect(body.actors.length).toBeGreaterThanOrEqual(expectedRes.actors.length);
     expect(body.actors.every((a) => a.kind === req.kind)).toBe(true);
     for (const actor of body.actors) {
       for (const key of fixtureKeys) {
@@ -2172,7 +2190,9 @@ describe('Tessera B6 — fixture gap coverage', () => {
     );
   });
 
-  it('task-get-truncated: agent_context.truncated=true and next_page_tokens match fixture contract', async () => {
+  it('task-get-truncated: agent_context.truncated=true and next_page_tokens match fixture contract',
+    // 21 sequential HTTP requests against a remote DB can take 12-14 s; give headroom.
+    async () => {
     const app = buildTestApp();
 
     const expectedRes = readFixture('task-get-truncated.res.json') as {
@@ -2237,14 +2257,14 @@ describe('Tessera B6 — fixture gap coverage', () => {
     expect(
       Object.keys(body.agent_context.next_page_tokens ?? {}).length,
     ).toBeGreaterThan(0);
-    expect(JSON.stringify(body.agent_context).length).toBeLessThanOrEqual(
-      32 * 1024,
-    );
+    expect(
+      Buffer.byteLength(JSON.stringify(body.agent_context), 'utf8'),
+    ).toBeLessThanOrEqual(32 * 1024);
     const tokenKeys = Object.keys(
       expectedRes.agent_context.next_page_tokens,
     );
     for (const key of tokenKeys) {
       expect(body.agent_context.next_page_tokens).toHaveProperty(key);
     }
-  });
+  }, 30_000);
 });
