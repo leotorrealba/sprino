@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sprino — reference implementation of Tessera
 
-import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
+import { mkdir, writeFile, unlink, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StorageBackend } from './storage.ts';
 
@@ -36,13 +36,29 @@ export class LocalStorageBackend implements StorageBackend {
 
   async write(attachmentId: string, data: Buffer): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    await writeFile(this.slotPath(attachmentId), data);
+    const target = this.slotPath(attachmentId);
+    // Guard against symlink-based escapes: if the slot path already exists,
+    // it must be a regular file. writeFile() follows symlinks, so a
+    // pre-planted symlink named after a UUID could overwrite arbitrary files.
+    try {
+      const info = await lstat(target);
+      if (!info.isFile()) {
+        throw new Error(`Attachment slot ${attachmentId} is not a regular file`);
+      }
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') throw err;
+      // ENOENT is expected for a new slot — proceed to create.
+    }
+    await writeFile(target, data);
   }
 
   async exists(attachmentId: string): Promise<boolean> {
     try {
-      const info = await stat(this.slotPath(attachmentId));
-      return info.size > 0;
+      // lstat (not stat) so symlinks report as symlinks, not as their targets.
+      // Returning true only for regular files prevents directories and symlinks
+      // from being misread as uploaded binaries.
+      const info = await lstat(this.slotPath(attachmentId));
+      return info.isFile() && info.size > 0;
     } catch (err: any) {
       if (err?.code === 'ENOENT') return false;
       // Re-throw permission errors, I/O failures, broken mounts — these are
