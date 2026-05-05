@@ -439,6 +439,14 @@ export const ActorRevokeTokenReqSchema = z
   .strict();
 export type ActorRevokeTokenReq = z.infer<typeof ActorRevokeTokenReqSchema>;
 
+export const ActorDeactivateReqSchema = z
+  .object({
+    operation_id: uuid,
+    actor_id: uuid,
+  })
+  .strict();
+export type ActorDeactivateReq = z.infer<typeof ActorDeactivateReqSchema>;
+
 export const ActorRegisterResSchema = z.object({
   actor: ActorSchema,
   // `token` is present ONLY on the first call; replay omits it. The
