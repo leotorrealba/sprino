@@ -31,6 +31,7 @@ import {
   ActorNotFoundError,
   transitionAgentLifecycle,
 } from './actors.ts';
+import { assertCanManageActors } from './authorization.ts';
 
 export class AgentHeartbeatForbiddenError extends Error {
   constructor(
@@ -39,13 +40,6 @@ export class AgentHeartbeatForbiddenError extends Error {
   ) {
     super('agents may heartbeat only themselves');
     this.name = 'AgentHeartbeatForbiddenError';
-  }
-}
-
-export class AgentDeactivateForbiddenError extends Error {
-  constructor(public readonly actorId: string) {
-    super('only human actors may deactivate agent sessions');
-    this.name = 'AgentDeactivateForbiddenError';
   }
 }
 
@@ -77,12 +71,15 @@ export async function deactivateAgent(
     req: ActorDeactivateReq;
     callerId: string;
     callerKind: 'human' | 'agent';
+    callerRole: 'admin' | 'member';
     now?: Date;
   },
 ): Promise<{ actor: Actor }> {
-  if (args.callerKind !== 'human') {
-    throw new AgentDeactivateForbiddenError(args.callerId);
-  }
+  assertCanManageActors({
+    id: args.callerId,
+    kind: args.callerKind,
+    role: args.callerRole,
+  });
 
   const requestHash = hashRequest(args.req);
 
@@ -91,6 +88,13 @@ export async function deactivateAgent(
 
   // not_found happens BEFORE we open a transaction — we never write an
   // operation row for a failed-precondition (mirrors revokeToken pattern).
+  const [pre] = await db
+    .select()
+    .from(actors)
+    .where(eq(actors.id, args.req.actor_id))
+    .limit(1);
+  if (!pre) throw new ActorNotFoundError(args.req.actor_id);
+
   const now = args.now ?? new Date();
 
   try {

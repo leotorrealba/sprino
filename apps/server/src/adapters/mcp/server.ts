@@ -37,7 +37,6 @@ import {
   ActorDeactivateReqSchema,
 } from '../../domain/index.ts';
 import {
-  AgentDeactivateForbiddenError,
   AgentHeartbeatForbiddenError,
   deactivateAgent,
   heartbeatAgent,
@@ -382,6 +381,7 @@ async function callTool(
         req,
         callerId: actor.id,
         callerKind: actor.kind,
+        callerRole: actor.role,
       });
       return wrapToolResult(res);
     }
@@ -471,12 +471,6 @@ function translateError(
       actor_id: err.actorId,
       target_actor_id: err.targetActorId,
       reason: 'actor_mismatch',
-    });
-  }
-  if (err instanceof AgentDeactivateForbiddenError) {
-    return rpcError(id, -32003, 'forbidden', {
-      actor_id: err.actorId,
-      reason: 'human_required',
     });
   }
   if (err instanceof LastAdminProtectedError) {
