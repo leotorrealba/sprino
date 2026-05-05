@@ -51,6 +51,10 @@ export const eventKindEnum = pgEnum('event_kind', [
   'context_updated',
   'commented',
 ]);
+export const attachmentStatusEnum = pgEnum('attachment_status', [
+  'pending',
+  'ready',
+]);
 
 // ────────────────────────────────────────────────────────────────────────
 // TABLES
@@ -239,6 +243,33 @@ export const operations = pgTable(
   }),
 );
 
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    filename: text('filename').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    status: attachmentStatusEnum('status').notNull().default('pending'),
+    url: text('url'),
+    storageKey: text('storage_key'),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => actors.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    taskIdx: index('attachments_task_idx').on(t.taskId),
+  }),
+);
+
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
@@ -252,3 +283,5 @@ export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
 export type OperationRow = typeof operations.$inferSelect;
 export type NewOperationRow = typeof operations.$inferInsert;
+export type AttachmentRow = typeof attachments.$inferSelect;
+export type NewAttachmentRow = typeof attachments.$inferInsert;
