@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { projects } from '../src/db/schema.ts';
+import { actors, projects } from '../src/db/schema.ts';
 import {
   ActorRegisterReqSchema,
   type ActorRegisterReq,
@@ -1918,5 +1918,333 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     );
     expect(mcpTextActor).toBeDefined();
     expectNoAgentLifecycleFields(mcpTextActor!);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Tessera B6 — fixture gap coverage.
+//
+// Each test below wires a previously uncovered req/res fixture pair to
+// the live server so that every fixture in tessera/conformance/fixtures/
+// is exercised. Structural fields are asserted exactly; fields whose
+// values depend on test-setup differences (display_name, created_at,
+// repo_path) are validated by type or regex instead of exact equality.
+// ───────────────────────────────────────────────────────────────────────
+
+describe('Tessera B6 — fixture gap coverage', () => {
+  it('project-list-happy: GET /api/projects returns {projects:[]} envelope with fixture-shape', async () => {
+    const app = buildTestApp();
+    await db.insert(projects).values({
+      id: SECOND_PROJECT_ID,
+      slug: 'tessera',
+      displayName: 'Tessera',
+      repoPath: SECOND_PROJECT_REPO,
+    });
+
+    const expectedRes = readFixture('project-list-happy.res.json') as {
+      projects: Array<Record<string, unknown>>;
+    };
+
+    const resp = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      projects: Array<Record<string, unknown>>;
+    };
+
+    expect(Array.isArray(body.projects)).toBe(true);
+    expect(body.projects.length).toBeGreaterThanOrEqual(
+      expectedRes.projects.length,
+    );
+    const fixtureKeys = Object.keys(expectedRes.projects[0]!);
+    for (const project of body.projects) {
+      for (const key of fixtureKeys) {
+        expect(project).toHaveProperty(key);
+      }
+      expect(project.id).toMatch(UUID_RE);
+      expect(project.created_at).toMatch(ISO_DATETIME_RE);
+    }
+    const slugs = body.projects.map((p) => p.slug);
+    expect(slugs).toContain('sprino');
+    expect(slugs).toContain('tessera');
+  });
+
+  it('project-get-by-repo-path-happy: GET /api/projects/resolve?repo_path returns {project} envelope', async () => {
+    const app = buildTestApp();
+    await db.insert(projects).values({
+      id: SECOND_PROJECT_ID,
+      slug: 'tessera',
+      displayName: 'Tessera',
+      repoPath: SECOND_PROJECT_REPO,
+    });
+
+    const req = readFixture(
+      'project-get-by-repo-path-happy.req.json',
+    ) as { repo_path: string };
+    const expectedRes = readFixture(
+      'project-get-by-repo-path-happy.res.json',
+    ) as { project: Record<string, unknown> };
+
+    const resp = await app.fetch(
+      new Request(
+        `http://test/api/projects/resolve?repo_path=${encodeURIComponent(req.repo_path)}`,
+        { headers: { authorization: `Bearer ${FIXTURE_TOKEN}` } },
+      ),
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { project: Record<string, unknown> };
+
+    expect(body.project.id).toBe(expectedRes.project.id);
+    expect(body.project.slug).toBe(expectedRes.project.slug);
+    expect(body.project.display_name).toBe(expectedRes.project.display_name);
+    expect(body.project.repo_path).toBe(req.repo_path);
+    expect(body.project.created_at).toMatch(ISO_DATETIME_RE);
+  });
+
+  it('actor-get-happy: GET /api/actors/:id returns fixture actor shape', async () => {
+    const app = buildTestApp();
+
+    const req = readFixture('actor-get-happy.req.json') as {
+      actor_id: string;
+    };
+    const expectedRes = readFixture('actor-get-happy.res.json') as {
+      actor: Record<string, unknown>;
+    };
+
+    const resp = await app.fetch(
+      new Request(`http://test/api/actors/${req.actor_id}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { actor: Record<string, unknown> };
+
+    expect(body.actor.id).toBe(expectedRes.actor.id);
+    expect(body.actor.kind).toBe(expectedRes.actor.kind);
+    expect(body.actor.agent_runtime).toBe(expectedRes.actor.agent_runtime);
+    expect(body.actor.parent_actor_id).toBe(expectedRes.actor.parent_actor_id);
+    expect(body.actor.created_at).toMatch(ISO_DATETIME_RE);
+    expect(typeof body.actor.display_name).toBe('string');
+    expectNoAgentLifecycleFields(body.actor);
+  });
+
+  it('actor-list-happy: GET /api/actors returns {actors:[]} envelope with fixture-shape actors', async () => {
+    const app = buildTestApp();
+
+    const expectedRes = readFixture('actor-list-happy.res.json') as {
+      actors: Array<Record<string, unknown>>;
+    };
+    const fixtureKeys = Object.keys(expectedRes.actors[0]!);
+
+    const resp = await app.fetch(
+      new Request('http://test/api/actors', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      actors: Array<Record<string, unknown>>;
+    };
+
+    expect(Array.isArray(body.actors)).toBe(true);
+    expect(body.actors.length).toBeGreaterThan(0);
+    for (const actor of body.actors) {
+      for (const key of fixtureKeys) {
+        expect(actor).toHaveProperty(key);
+      }
+      expect(actor.id).toMatch(UUID_RE);
+      expect(actor.created_at).toMatch(ISO_DATETIME_RE);
+      expectNoAgentLifecycleFields(actor);
+    }
+  });
+
+  it('actor-list-filtered-by-kind: GET /api/actors?kind=human returns only humans matching fixture shape', async () => {
+    const app = buildTestApp();
+
+    const req = readFixture('actor-list-filtered-by-kind.req.json') as {
+      kind: string;
+    };
+    const expectedRes = readFixture(
+      'actor-list-filtered-by-kind.res.json',
+    ) as { actors: Array<Record<string, unknown>> };
+    const fixtureKeys = Object.keys(expectedRes.actors[0]!);
+
+    const resp = await app.fetch(
+      new Request(`http://test/api/actors?kind=${req.kind}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as {
+      actors: Array<Record<string, unknown>>;
+    };
+
+    expect(body.actors.every((a) => a.kind === req.kind)).toBe(true);
+    for (const actor of body.actors) {
+      for (const key of fixtureKeys) {
+        expect(actor).toHaveProperty(key);
+      }
+      expectNoAgentLifecycleFields(actor);
+    }
+  });
+
+  it('actor-register-agent-invalid-parent: rejects agent with agent parent using fixture request', async () => {
+    const app = buildTestApp();
+
+    const req = readFixture(
+      'actor-register-agent-invalid-parent.req.json',
+    ) as Record<string, unknown>;
+    const expectedRes = readFixture(
+      'actor-register-agent-invalid-parent.res.json',
+    ) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+
+    // Seed the specific agent actor the fixture's parent_actor_id references.
+    await db.insert(actors).values({
+      id: req.parent_actor_id as string,
+      kind: 'agent',
+      role: 'member',
+      displayName: 'Fixture Agent Parent',
+      agentRuntime: 'claude-code',
+      parentActorId: FIXTURE_ACTOR_ID,
+      source: 'db',
+    });
+
+    const resp = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(resp.status).toBe(expectedRes._error.status);
+    const body = (await resp.json()) as {
+      _error: {
+        status: number;
+        code: string;
+        details: { field: string; reason: string };
+      };
+    };
+    expect(body._error.status).toBe(expectedRes._error.status);
+    expect(body._error.code).toBe(expectedRes._error.code);
+    expect(body._error.details.field).toBe(expectedRes._error.details.field);
+    expect(body._error.details.reason).toBe(expectedRes._error.details.reason);
+  });
+
+  it('actor-register-agent-operation-replay: agent register replay omits token and returns same actor', async () => {
+    const app = buildTestApp();
+
+    const req = readFixture(
+      'actor-register-agent-operation-replay.req.json',
+    ) as Record<string, unknown>;
+    const expectedRes = readFixture(
+      'actor-register-agent-operation-replay.res.json',
+    ) as { actor: Record<string, unknown> };
+
+    // First registration — should succeed and mint a token.
+    const first = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(first.status).toBe(201);
+    const firstJson = (await first.json()) as {
+      actor: Record<string, unknown>;
+      token: string;
+    };
+    expect(firstJson.actor.kind).toBe(expectedRes.actor.kind);
+    expect(firstJson.actor.display_name).toBe(expectedRes.actor.display_name);
+    expect(firstJson.actor.agent_runtime).toBe(expectedRes.actor.agent_runtime);
+    expect(firstJson.actor.parent_actor_id).toBe(req.parent_actor_id);
+    expect(typeof firstJson.token).toBe('string');
+
+    // Replay — same op_id, same payload: token MUST be omitted.
+    const replay = await app.fetch(
+      new Request('http://test/api/actors', bearer(req)),
+    );
+    expect(replay.status).toBe(201);
+    const replayJson = (await replay.json()) as Record<string, unknown>;
+    expect('token' in replayJson).toBe(false);
+    expect((replayJson.actor as Record<string, unknown>).id).toBe(
+      firstJson.actor.id,
+    );
+  });
+
+  it('task-get-truncated: agent_context.truncated=true and next_page_tokens match fixture contract', async () => {
+    const app = buildTestApp();
+
+    const expectedRes = readFixture('task-get-truncated.res.json') as {
+      agent_context: {
+        truncated: boolean;
+        next_page_tokens: Record<string, string>;
+      };
+    };
+
+    // Build state: create a task then flood it with events to exceed 32KB.
+    const createResp = await app.fetch(
+      new Request(
+        'http://test/api/tasks',
+        bearer({
+          operation_id: '018c3e7a-b601-7000-8000-000000000001',
+          project_id: FIXTURE_PROJECT_ID,
+          title: 'Long-running task with extensive agent context',
+        }),
+      ),
+    );
+    expect(createResp.status).toBe(201);
+    const { task } = (await createResp.json()) as { task: { id: string } };
+    const taskId = task.id;
+
+    const heavyNotes = 'lorem ipsum '.repeat(200);
+    let prevStatus = 'todo';
+    for (let i = 0; i < 20; i++) {
+      const next = prevStatus === 'todo' ? 'doing' : 'todo';
+      const flipResp = await app.fetch(
+        new Request(
+          `http://test/api/tasks/${taskId}/status`,
+          bearer(
+            {
+              operation_id: `018c3e7a-b601-7000-8000-${i.toString(16).padStart(12, '0')}`,
+              status: next,
+              if_match: i + 1,
+              notes: heavyNotes,
+            },
+            'PATCH',
+          ),
+        ),
+      );
+      expect(flipResp.status).toBe(200);
+      prevStatus = next;
+    }
+
+    const getResp = await app.fetch(
+      new Request(`http://test/api/tasks/${taskId}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(getResp.status).toBe(200);
+    const body = (await getResp.json()) as {
+      agent_context: {
+        truncated: boolean;
+        next_page_tokens?: Record<string, string>;
+      };
+    };
+
+    expect(body.agent_context.truncated).toBe(expectedRes.agent_context.truncated);
+    expect(body.agent_context.next_page_tokens).toBeDefined();
+    expect(
+      Object.keys(body.agent_context.next_page_tokens ?? {}).length,
+    ).toBeGreaterThan(0);
+    expect(JSON.stringify(body.agent_context).length).toBeLessThanOrEqual(
+      32 * 1024,
+    );
+    const tokenKeys = Object.keys(
+      expectedRes.agent_context.next_page_tokens,
+    );
+    for (const key of tokenKeys) {
+      expect(body.agent_context.next_page_tokens).toHaveProperty(key);
+    }
   });
 });
