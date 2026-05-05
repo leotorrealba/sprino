@@ -5,8 +5,16 @@
  *
  * B2 stored lifecycle metadata and exposed only the internal
  * `transitionAgentLifecycle()` primitive. B4 keeps the business logic
- * centralized by layering the public self-heartbeat rule and the stale
- * session cleanup scan on top of that primitive.
+ * centralized here. `heartbeatAgent()` routes through
+ * `transitionAgentLifecycle()` so per-actor invariants (active-only,
+ * idempotent deactivate) are enforced in one place.
+ *
+ * `expireStaleAgents()` intentionally bypasses that per-actor primitive and
+ * issues a single bulk SQL UPDATE instead. Per-actor row-locking would be
+ * O(n) network round-trips and does not compose well with a background job
+ * that may process thousands of stale sessions at once. This deviation from
+ * the `transitionAgentLifecycle()` boundary is documented here so it is
+ * explicit rather than implicit.
  */
 
 import { and, eq, isNull, lt, or } from 'drizzle-orm';

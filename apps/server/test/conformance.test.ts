@@ -351,7 +351,7 @@ describe('Tessera v0.0.2 conformance — task happy path sequence', () => {
 });
 
 describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () => {
-  it('tools/list returns the Tessera verbs and advertises actor lifecycle fields', async () => {
+  it('tools/list exposes the heartbeat verb and actor.register distinguishes agent-specific required fields', async () => {
     const app = buildTestApp();
     const resp = await app.fetch(
       new Request(
