@@ -20,8 +20,17 @@
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { actors } from '../db/schema.ts';
-import type { Actor, ActorHeartbeatReq } from '../domain/index.ts';
-import { transitionAgentLifecycle } from './actors.ts';
+import type { Actor, ActorDeactivateReq, ActorHeartbeatReq } from '../domain/index.ts';
+import {
+  checkIdempotency,
+  hashRequest,
+  recordOperation,
+} from './idempotency.ts';
+import {
+  ActorLifecycleTransitionError,
+  ActorNotFoundError,
+  transitionAgentLifecycle,
+} from './actors.ts';
 
 export class AgentHeartbeatForbiddenError extends Error {
   constructor(
@@ -30,6 +39,13 @@ export class AgentHeartbeatForbiddenError extends Error {
   ) {
     super('agents may heartbeat only themselves');
     this.name = 'AgentHeartbeatForbiddenError';
+  }
+}
+
+export class AgentDeactivateForbiddenError extends Error {
+  constructor(public readonly actorId: string) {
+    super('only human actors may deactivate agent sessions');
+    this.name = 'AgentDeactivateForbiddenError';
   }
 }
 
@@ -53,6 +69,91 @@ export async function heartbeatAgent(
     transition: 'heartbeat',
     now: args.now,
   });
+}
+
+export async function deactivateAgent(
+  db: Db,
+  args: {
+    req: ActorDeactivateReq;
+    callerId: string;
+    callerKind: 'human' | 'agent';
+    now?: Date;
+  },
+): Promise<{ actor: Actor }> {
+  if (args.callerKind !== 'human') {
+    throw new AgentDeactivateForbiddenError(args.callerId);
+  }
+
+  const requestHash = hashRequest(args.req);
+
+  const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
+  if (cached) return cached as { actor: Actor };
+
+  // not_found happens BEFORE we open a transaction — we never write an
+  // operation row for a failed-precondition (mirrors revokeToken pattern).
+  const now = args.now ?? new Date();
+
+  try {
+    return await db.transaction(async (tx) => {
+      // Row-lock + deactivate in one atomic step — same approach as the
+      // heartbeat path in transitionAgentLifecycle, but inlined here so
+      // recordOperation can share the same transaction.
+      const [locked] = await tx
+        .select()
+        .from(actors)
+        .where(eq(actors.id, args.req.actor_id))
+        .for('update')
+        .limit(1);
+      if (!locked) throw new ActorNotFoundError(args.req.actor_id);
+
+      if (locked.kind !== 'agent') {
+        throw new ActorLifecycleTransitionError({
+          actorId: args.req.actor_id,
+          actorKind: locked.kind,
+          transition: 'deactivate',
+          code: 'actor_kind_not_agent',
+        });
+      }
+
+      let actorRow = locked;
+      if (locked.lifecycleState === 'active') {
+        const [updated] = await tx
+          .update(actors)
+          .set({ lifecycleState: 'inactive', deactivatedAt: now })
+          .where(eq(actors.id, args.req.actor_id))
+          .returning();
+        actorRow = updated!;
+      }
+
+      const result = {
+        actor: {
+          id: actorRow.id,
+          kind: actorRow.kind,
+          display_name: actorRow.displayName,
+          agent_runtime: actorRow.agentRuntime,
+          parent_actor_id: actorRow.parentActorId,
+          created_at: actorRow.createdAt.toISOString(),
+        } satisfies Actor,
+      };
+
+      await recordOperation(tx, {
+        operationId: args.req.operation_id,
+        actorId: args.callerId,
+        requestHash,
+        responseBody: result,
+      });
+
+      return result;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(
+      db,
+      args.req.operation_id,
+      requestHash,
+    );
+    if (raced) return raced as { actor: Actor };
+    throw err;
+  }
 }
 
 export async function expireStaleAgents(

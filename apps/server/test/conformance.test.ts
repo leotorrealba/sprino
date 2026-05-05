@@ -365,6 +365,7 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       result: { tools: Array<{ name: string }> };
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
+      'sprino.actor.deactivate',
       'sprino.actor.get',
       'sprino.actor.heartbeat',
       'sprino.actor.list',
@@ -1372,6 +1373,318 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
       ),
     );
     expect(agentRegister.status).toBe(403);
+  });
+
+  it('actor-heartbeat-happy fixture: HTTP and MCP heartbeat return the actor envelope without token', async () => {
+    const app = buildTestApp();
+
+    // Register an agent using the canonical fixture (parent_actor_id = FIXTURE_ACTOR_ID)
+    const agentRegReq = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(agentRegReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as {
+      actor: Record<string, unknown>;
+      token: string;
+    };
+    const agentId = regJson.actor.id as string;
+    const agentToken = regJson.token;
+
+    // Read the heartbeat fixtures for shape validation
+    const heartbeatReq = readFixture(
+      'actor-heartbeat-happy.req.json',
+    ) as Record<string, unknown>;
+    const heartbeatRes = readFixture(
+      'actor-heartbeat-happy.res.json',
+    ) as { actor: Record<string, unknown> };
+
+    // HTTP heartbeat: agent calls its own heartbeat
+    const httpRes = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentId}/heartbeat`,
+        bearerForToken(agentToken, { ...heartbeatReq, actor_id: agentId }),
+      ),
+    );
+    expect(httpRes.status).toBe(200);
+    const httpBody = (await httpRes.json()) as {
+      actor: Record<string, unknown>;
+      token?: unknown;
+    };
+    // Fixture shape assertions
+    expect(httpBody.actor.kind).toBe(heartbeatRes.actor.kind);
+    expect(httpBody.actor.kind).toBe('agent');
+    expect(httpBody.actor.display_name).toBe(heartbeatRes.actor.display_name);
+    expect(httpBody.actor.agent_runtime).toBe(heartbeatRes.actor.agent_runtime);
+    expect(httpBody.actor.parent_actor_id).toBe(agentRegReq.parent_actor_id);
+    expect(httpBody.actor.id).toMatch(UUID_RE);
+    expect(httpBody.actor.created_at).toMatch(ISO_DATETIME_RE);
+    // No token in response
+    expect('token' in httpBody).toBe(false);
+
+    // MCP heartbeat
+    const mcpRes = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearerForToken(agentToken, {
+          jsonrpc: '2.0',
+          id: 501,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.heartbeat',
+            arguments: { actor_id: agentId },
+          },
+        }),
+      ),
+    );
+    expect(mcpRes.status).toBe(200);
+    const mcpBody = (await mcpRes.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: { actor: Record<string, unknown> };
+      };
+    };
+    const mcpActor = mcpBody.result.structuredContent.actor;
+    expect(mcpActor.kind).toBe('agent');
+    expect(mcpActor.display_name).toBe(heartbeatRes.actor.display_name);
+    expect(mcpActor.agent_runtime).toBe(heartbeatRes.actor.agent_runtime);
+    expect(mcpActor.parent_actor_id).toBe(agentRegReq.parent_actor_id);
+    expect(mcpActor.id).toMatch(UUID_RE);
+    expect(mcpActor.created_at).toMatch(ISO_DATETIME_RE);
+    // Verify no token in structuredContent
+    expect('token' in mcpBody.result.structuredContent).toBe(false);
+    // text/structuredContent parity
+    expect(mcpBody.result.content[0]?.text).toBe(
+      JSON.stringify(mcpBody.result.structuredContent),
+    );
+  });
+
+  it('actor-deactivate-happy fixture: HTTP deactivation by a human returns actor envelope', async () => {
+    const app = buildTestApp();
+
+    // Register an agent first
+    const agentRegReq = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(agentRegReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as { actor: Record<string, unknown> };
+    const agentId = regJson.actor.id as string;
+
+    const deactivateReq = readFixture(
+      'actor-deactivate-happy.req.json',
+    ) as Record<string, unknown>;
+    const expectedRes = readFixture(
+      'actor-deactivate-happy.res.json',
+    ) as { actor: Record<string, unknown> };
+
+    // Human caller deactivates the agent
+    const httpRes = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentId}/deactivate`,
+        bearer({ ...deactivateReq, actor_id: agentId }),
+      ),
+    );
+    expect(httpRes.status).toBe(200);
+    const httpBody = (await httpRes.json()) as {
+      actor: Record<string, unknown>;
+      token?: unknown;
+    };
+    // Fixture shape assertions
+    expect(httpBody.actor.kind).toBe(expectedRes.actor.kind);
+    expect(httpBody.actor.kind).toBe('agent');
+    expect(httpBody.actor.display_name).toBe(expectedRes.actor.display_name);
+    expect(httpBody.actor.agent_runtime).toBe(expectedRes.actor.agent_runtime);
+    expect(httpBody.actor.parent_actor_id).toBe(agentRegReq.parent_actor_id);
+    expect(httpBody.actor.id).toMatch(UUID_RE);
+    expect(httpBody.actor.created_at).toMatch(ISO_DATETIME_RE);
+    // No token in response
+    expect('token' in httpBody).toBe(false);
+  });
+
+  it('actor-deactivate-already-inactive fixture: deactivating inactive agent is domain-idempotent', async () => {
+    const app = buildTestApp();
+
+    // Register an agent
+    const agentRegReq = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(agentRegReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as { actor: Record<string, unknown> };
+    const agentId = regJson.actor.id as string;
+
+    const deactivateHappyReq = readFixture(
+      'actor-deactivate-happy.req.json',
+    ) as Record<string, unknown>;
+
+    // First deactivation
+    const first = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentId}/deactivate`,
+        bearer({ ...deactivateHappyReq, actor_id: agentId }),
+      ),
+    );
+    expect(first.status).toBe(200);
+
+    // Second deactivation with a new operation_id — domain-idempotent, no error
+    const alreadyInactiveReq = readFixture(
+      'actor-deactivate-already-inactive.req.json',
+    ) as Record<string, unknown>;
+    const expectedRes = readFixture(
+      'actor-deactivate-already-inactive.res.json',
+    ) as { actor: Record<string, unknown> };
+
+    const second = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentId}/deactivate`,
+        bearer({ ...alreadyInactiveReq, actor_id: agentId }),
+      ),
+    );
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as {
+      actor: Record<string, unknown>;
+    };
+    expect(secondBody.actor.kind).toBe(expectedRes.actor.kind);
+    expect(secondBody.actor.id).toBe(agentId);
+    expect('token' in secondBody).toBe(false);
+  });
+
+  it('actor-deactivate via MCP returns structuredContent actor envelope', async () => {
+    const app = buildTestApp();
+
+    // Register an agent
+    const agentRegReq = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(agentRegReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as { actor: Record<string, unknown> };
+    const agentId = regJson.actor.id as string;
+
+    // Human calls MCP deactivate
+    const mcpRes = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 502,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.deactivate',
+            arguments: {
+              operation_id: '018c3e7a-0005-7000-8000-000000000532',
+              actor_id: agentId,
+            },
+          },
+        }),
+      ),
+    );
+    expect(mcpRes.status).toBe(200);
+    const mcpBody = (await mcpRes.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: { actor: Record<string, unknown> };
+      };
+    };
+    const mcpActor = mcpBody.result.structuredContent.actor;
+    expect(mcpActor.kind).toBe('agent');
+    expect(mcpActor.id).toBe(agentId);
+    expect(mcpActor.id).toMatch(UUID_RE);
+    expect(mcpActor.created_at).toMatch(ISO_DATETIME_RE);
+    expect('token' in mcpBody.result.structuredContent).toBe(false);
+    // text/structuredContent parity
+    expect(mcpBody.result.content[0]?.text).toBe(
+      JSON.stringify(mcpBody.result.structuredContent),
+    );
+  });
+
+  it('rejects agent calling deactivate with 403 forbidden', async () => {
+    const app = buildTestApp();
+
+    // Register an agent
+    const agentRegReq = readFixture(
+      'actor-register-agent-happy.req.json',
+    ) as Record<string, unknown>;
+    const regResp = await app.fetch(
+      new Request('http://test/api/actors', bearer(agentRegReq)),
+    );
+    expect(regResp.status).toBe(201);
+    const regJson = (await regResp.json()) as {
+      actor: Record<string, unknown>;
+      token: string;
+    };
+    const agentId = regJson.actor.id as string;
+    const agentToken = regJson.token;
+
+    // Agent tries to deactivate via HTTP — must be rejected
+    const httpRes = await app.fetch(
+      new Request(
+        `http://test/api/actors/${agentId}/deactivate`,
+        bearerForToken(agentToken, {
+          operation_id: '018c3e7a-0005-7000-8000-000000000533',
+          actor_id: agentId,
+        }),
+      ),
+    );
+    expect(httpRes.status).toBe(403);
+    const httpBody = (await httpRes.json()) as {
+      _error: { code: string; details: { field: string; reason: string } };
+    };
+    expect(httpBody._error.code).toBe('forbidden');
+
+    // Agent tries to deactivate via MCP — must be rejected
+    const mcpRes = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearerForToken(agentToken, {
+          jsonrpc: '2.0',
+          id: 503,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.actor.deactivate',
+            arguments: {
+              operation_id: '018c3e7a-0005-7000-8000-000000000534',
+              actor_id: agentId,
+            },
+          },
+        }),
+      ),
+    );
+    expect(mcpRes.status).toBe(200);
+    const mcpBody = (await mcpRes.json()) as {
+      error: { code: number; message: string };
+    };
+    expect(mcpBody.error.code).toBe(-32003);
+    expect(mcpBody.error.message).toBe('forbidden');
+  });
+
+  it('rejects deactivate of a human actor with validation error', async () => {
+    const app = buildTestApp();
+
+    // Try to deactivate a human actor — lifecycle transitions are agent-only
+    const httpRes = await app.fetch(
+      new Request(
+        `http://test/api/actors/${FIXTURE_ACTOR_ID}/deactivate`,
+        bearer({
+          operation_id: '018c3e7a-0005-7000-8000-000000000535',
+          actor_id: FIXTURE_ACTOR_ID,
+        }),
+      ),
+    );
+    expect(httpRes.status).toBe(409);
+    const httpBody = (await httpRes.json()) as {
+      _error: { code: string };
+    };
+    expect(httpBody._error.code).toBe('actor_kind_not_agent');
   });
 
   it('keeps internal agent lifecycle storage out of external actor and task contracts', async () => {
