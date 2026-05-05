@@ -753,7 +753,7 @@ describe('Tessera v0.1.1 conformance — new fixtures', () => {
       Object.values(body.agent_context.next_page_tokens ?? {}).length,
     ).toBeGreaterThan(0);
     expect(
-      JSON.stringify(body.agent_context).length,
+      Buffer.byteLength(JSON.stringify(body.agent_context), 'utf8'),
     ).toBeLessThanOrEqual(32 * 1024);
   });
 });
