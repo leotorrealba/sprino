@@ -9,7 +9,7 @@
 -- - deleted_at enables soft-delete so attachment.get by id survives after "deletion".
 -- - storage_key is NULL while pending; set by the service on finalize to the
 --   path relative to the storage root. The download url is then served by the
---   upload route, not stored in the DB.
+--   download route, not stored in the DB.
 -- - url is set by the service on finalize; NULL while pending.
 
 DO $$

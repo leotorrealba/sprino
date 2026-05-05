@@ -63,17 +63,17 @@ describe('attachments DB metadata (C2-P1)', () => {
 
   it('attachments table has a task_id foreign key to tasks', async () => {
     const result = await db.execute<{ conname: string }>(sql`
-      SELECT conname
-      FROM pg_constraint
-      JOIN pg_class ON pg_constraint.conrelid = pg_class.oid
-      WHERE pg_class.relname = 'attachments'
-        AND pg_constraint.contype = 'f'
-        AND pg_constraint.conname LIKE '%task%'
+      SELECT c.conname
+      FROM pg_constraint c
+      JOIN pg_class src ON c.conrelid = src.oid
+      WHERE src.relname = 'attachments'
+        AND c.contype = 'f'
+        AND c.confrelid = 'tasks'::regclass
     `);
     expect(result.rows.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('DB enforces pending invariant (url must be NULL when pending)', async () => {
+  it('DB enforces pending invariant (url and finalized_at must be NULL when pending)', async () => {
     const result = await db.execute<{ conname: string }>(sql`
       SELECT conname FROM pg_constraint
       WHERE conrelid = 'attachments'::regclass
