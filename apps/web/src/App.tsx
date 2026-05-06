@@ -3,9 +3,10 @@ import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
 import { Members } from './components/Members';
+import { TaskWorkflowBoard } from './components/TaskWorkflowBoard';
 
 type LoadState = 'idle' | 'loading' | 'error';
-type View = 'tasks' | 'members';
+type View = 'tasks' | 'members' | 'board';
 
 const STATUSES: TaskStatus[] = ['todo', 'doing', 'done', 'blocked'];
 
@@ -286,6 +287,16 @@ export function App() {
               >
                 Members
               </button>
+              <button
+                onClick={() => setView('board')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'board'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Board
+              </button>
             </nav>
             <select
               value={selectedProjectId}
@@ -371,6 +382,15 @@ export function App() {
       <main className="mx-auto max-w-4xl px-6 py-8">
         {view === 'members' ? (
           <Members token={token} />
+        ) : view === 'board' ? (
+          selectedProjectId && (
+            <TaskWorkflowBoard
+              projectId={selectedProjectId}
+              token={token}
+              tasks={tasks}
+              onTaskUpdated={refresh}
+            />
+          )
         ) : (
           <>
             <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
