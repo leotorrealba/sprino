@@ -173,10 +173,12 @@ export const tasks = pgTable(
     workflowColumnId: uuid('workflow_column_id').references(
       () => workflowColumns.id,
     ),
+    rank: integer('rank').notNull().default(0),
   },
   (t) => ({
     projectIdx: index('tasks_project_idx').on(t.projectId),
     statusIdx: index('tasks_status_idx').on(t.projectId, t.status),
+    rankColumnIdx: index('tasks_rank_column_idx').on(t.workflowColumnId, t.rank),
   }),
 );
 
