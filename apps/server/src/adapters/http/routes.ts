@@ -37,6 +37,7 @@ import {
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskListReqSchema,
+  TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
   TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
@@ -88,6 +89,7 @@ import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
+  TaskNotInColumnError,
   VersionMismatchError,
   WorkflowColumnNotFoundError,
   WorkflowTransitionForbiddenError,
@@ -97,6 +99,7 @@ import {
   listTaskEvents,
   listTasks,
   listWorkflowColumns,
+  reorderTask,
   transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
@@ -174,8 +177,11 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   // Not exposed via /mcp to keep the canonical protocol minimal.
   api.get('/tasks', async (c) => {
     try {
+      const statusParam = c.req.queries('status') ?? [];
       const req = TaskListReqSchema.parse({
         project_id: c.req.query('project_id'),
+        status: statusParam.length > 0 ? statusParam : undefined,
+        assignee_id: c.req.query('assignee_id') || undefined,
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
@@ -238,6 +244,21 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         req,
         actorId: actor.id,
       });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/tasks/:id/reorder', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskReorderReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await reorderTask(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -793,6 +814,12 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof TaskNotFoundError) {
     return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);
+  }
+  if (err instanceof TaskNotInColumnError) {
+    return c.json(
+      { error: 'task_not_in_column', task_id: err.taskId, column_id: err.columnId },
+      422,
+    );
   }
   if (err instanceof VersionMismatchError) {
     return c.json(
