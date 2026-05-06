@@ -2366,7 +2366,7 @@ describe('Tessera v0.1.4 conformance — attachment happy path sequence', () => 
       expectedFinalize.attachment.status,
     );
     expect(finalizeJson.attachment.status).toBe('ready');
-    expect(finalizeJson.attachment.url).toBe(`/api/attachments/${attId}`);
+    expect(finalizeJson.attachment.url).toBe(`/api/attachments/${attId}/download`);
     expect(finalizeJson.attachment.task_id).toBe(
       expectedFinalize.attachment.task_id,
     );
@@ -2399,7 +2399,7 @@ describe('Tessera v0.1.4 conformance — attachment happy path sequence', () => 
 
     expect(getJson.attachment.id).toBe(attId);
     expect(getJson.attachment.status).toBe(expectedGet.attachment.status);
-    expect(getJson.attachment.url).toBe(`/api/attachments/${attId}`);
+    expect(getJson.attachment.url).toBe(`/api/attachments/${attId}/download`);
     expect(getJson.attachment.filename).toBe(expectedGet.attachment.filename);
     expect(getJson.attachment.task_id).toBe(expectedGet.attachment.task_id);
     expect(getJson.attachment.created_by).toBe(FIXTURE_ACTOR_ID);
@@ -2425,7 +2425,7 @@ describe('Tessera v0.1.4 conformance — attachment happy path sequence', () => 
     const listedAtt = listJson.attachments[0]!;
     expect(listedAtt.id).toBe(attId);
     expect(listedAtt.status).toBe('ready');
-    expect(listedAtt.url).toBe(`/api/attachments/${attId}`);
+    expect(listedAtt.url).toBe(`/api/attachments/${attId}/download`);
     expect(listedAtt.filename).toBe(expectedList.attachments[0]!.filename);
     expect(listedAtt.task_id).toBe(FIXTURE_TASK_ID);
     expect(listedAtt.created_by).toBe(FIXTURE_ACTOR_ID);

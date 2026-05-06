@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sprino — reference implementation of Tessera
 
-import { mkdir, writeFile, unlink, lstat } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, unlink, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { StorageBackend } from './storage.ts';
 
@@ -20,8 +20,8 @@ const UUID_RE =
  * swap this for an S3StorageBackend that returns presigned PUT/GET URLs.
  *
  * Upload and download URLs are served by Sprino's own HTTP layer:
- *   PUT  /api/attachments/{id}/upload  → upload route calls write()
- *   GET  /api/attachments/{id}         → download route streams the file
+ *   PUT  /api/attachments/{id}/upload    → upload route calls write()
+ *   GET  /api/attachments/{id}/download  → download route calls read()
  */
 export class LocalStorageBackend implements StorageBackend {
   constructor(private readonly dir: string) {}
@@ -31,7 +31,7 @@ export class LocalStorageBackend implements StorageBackend {
   }
 
   downloadUrl(attachmentId: string): string {
-    return `/api/attachments/${attachmentId}`;
+    return `/api/attachments/${attachmentId}/download`;
   }
 
   async write(attachmentId: string, data: Buffer): Promise<void> {
@@ -65,6 +65,10 @@ export class LocalStorageBackend implements StorageBackend {
       // storage outages, not "file not uploaded" situations.
       throw err;
     }
+  }
+
+  async read(attachmentId: string): Promise<Buffer> {
+    return readFile(this.slotPath(attachmentId));
   }
 
   async remove(attachmentId: string): Promise<void> {

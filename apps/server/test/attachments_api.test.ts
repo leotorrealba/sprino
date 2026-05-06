@@ -108,7 +108,7 @@ describe('attachment service (C3-P1)', () => {
       actorId: FIXTURE_ACTOR_ID,
     });
     expect(res.attachment.status).toBe('ready');
-    expect(res.attachment.url).toBe(`/api/attachments/${attachment.id}`);
+    expect(res.attachment.url).toBe(`/api/attachments/${attachment.id}/download`);
   });
 
   it('finalize throws AttachmentNotReadyError when binary is absent', async () => {
@@ -345,7 +345,7 @@ describe('attachment HTTP adapter (C3-P2)', () => {
       attachment: Record<string, unknown>;
     };
     expect(json.attachment.status).toBe('ready');
-    expect(json.attachment.url).toBe(`/api/attachments/${attachment.id}`);
+    expect(json.attachment.url).toBe(`/api/attachments/${attachment.id}/download`);
   });
 
   it('POST /api/attachments/:id/finalize → 409 when binary absent', async () => {
@@ -461,5 +461,112 @@ describe('attachment HTTP adapter (C3-P2)', () => {
     expect(json.attachments).toHaveLength(1);
     expect(json.attachments[0]!.status).toBe('ready');
     expect(json.attachments[0]!.id).toBe(attachment.id);
+  });
+
+  it('GET /api/tasks/:id/attachments → 404 for unknown task_id', async () => {
+    const app = buildTestApp();
+    const resp = await app.fetch(
+      new Request(`http://test/api/tasks/${uuidv7()}/attachments`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(404);
+    const json = (await resp.json()) as Record<string, unknown>;
+    expect(json.error).toBe('task_not_found');
+  });
+
+  it('PUT /api/attachments/:id/upload → 409 when attachment already finalized', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    const createResp = await app.fetch(
+      new Request('http://test/api/attachments', bearer(makeBody())),
+    );
+    const { attachment, upload_url } = (await createResp.json()) as {
+      attachment: { id: string };
+      upload_url: string;
+    };
+
+    await app.fetch(
+      new Request(`http://test${upload_url}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, 'content-type': 'application/pdf' },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      }),
+    );
+    await app.fetch(
+      new Request(
+        `http://test/api/attachments/${attachment.id}/finalize`,
+        bearer({ operation_id: uuidv7() }),
+      ),
+    );
+
+    const retryUpload = await app.fetch(
+      new Request(`http://test${upload_url}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, 'content-type': 'application/pdf' },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      }),
+    );
+    expect(retryUpload.status).toBe(409);
+    const json = (await retryUpload.json()) as Record<string, unknown>;
+    expect(json.error).toBe('attachment_already_finalized');
+  });
+
+  it('GET /api/attachments/:id/download → 200 streams binary for ready attachment', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    const createResp = await app.fetch(
+      new Request('http://test/api/attachments', bearer(makeBody())),
+    );
+    const { attachment, upload_url } = (await createResp.json()) as {
+      attachment: { id: string; content_type: string };
+      upload_url: string;
+    };
+
+    const payload = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    await app.fetch(
+      new Request(`http://test${upload_url}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, 'content-type': 'application/pdf' },
+        body: payload,
+      }),
+    );
+    await app.fetch(
+      new Request(
+        `http://test/api/attachments/${attachment.id}/finalize`,
+        bearer({ operation_id: uuidv7() }),
+      ),
+    );
+
+    const dlResp = await app.fetch(
+      new Request(`http://test/api/attachments/${attachment.id}/download`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(dlResp.status).toBe(200);
+    expect(dlResp.headers.get('content-type')).toBe('application/pdf');
+    const body = new Uint8Array(await dlResp.arrayBuffer());
+    expect(body).toEqual(payload);
+  });
+
+  it('GET /api/attachments/:id/download → 409 when attachment is still pending', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    const createResp = await app.fetch(
+      new Request('http://test/api/attachments', bearer(makeBody())),
+    );
+    const { attachment } = (await createResp.json()) as { attachment: { id: string } };
+
+    const dlResp = await app.fetch(
+      new Request(`http://test/api/attachments/${attachment.id}/download`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(dlResp.status).toBe(409);
+    const json = (await dlResp.json()) as Record<string, unknown>;
+    expect(json.error).toBe('binary_not_uploaded');
   });
 });

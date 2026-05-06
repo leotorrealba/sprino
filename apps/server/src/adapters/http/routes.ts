@@ -423,6 +423,17 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   api.put('/attachments/:id/upload', async (c) => {
     try {
       const attachmentId = c.req.param('id');
+      // Verify the slot exists and is still pending before writing bytes.
+      // Prevents orphan blobs from arbitrary UUIDs and overwrites of finalized attachments.
+      const { attachment } = await getAttachment(c.get('db'), {
+        req: { attachment_id: attachmentId },
+      });
+      if (attachment.status !== 'pending') {
+        return c.json(
+          { error: 'attachment_already_finalized', attachment_id: attachmentId },
+          409,
+        );
+      }
       const data = await c.req.arrayBuffer();
       await storage.write(attachmentId, Buffer.from(data));
       return new Response(null, { status: 204 });
@@ -430,6 +441,28 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       if (err instanceof Error && err.message.startsWith('Invalid attachment id')) {
         return c.json({ error: 'validation_error', details: err.message }, 400);
       }
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/attachments/:id/download', async (c) => {
+    try {
+      const attachmentId = c.req.param('id');
+      const { attachment } = await getAttachment(c.get('db'), {
+        req: { attachment_id: attachmentId },
+      });
+      if (attachment.status !== 'ready') {
+        return c.json(
+          { error: 'binary_not_uploaded', attachment_id: attachmentId },
+          409,
+        );
+      }
+      const data = await storage.read(attachmentId);
+      return new Response(data, {
+        status: 200,
+        headers: { 'Content-Type': attachment.content_type },
+      });
+    } catch (err) {
       return errorResponse(c, err);
     }
   });

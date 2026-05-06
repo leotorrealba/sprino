@@ -114,37 +114,41 @@ export async function createUpload(
   const attachmentId = uuidv7();
   const uploadUrl = storage.uploadUrl(attachmentId);
 
-  const response = await db.transaction(async (tx) => {
-    await tx.insert(attachments).values({
-      id: attachmentId,
-      taskId: req.task_id,
-      filename: req.filename,
-      contentType: req.content_type,
-      sizeBytes: req.size_bytes,
-      status: 'pending',
-      url: null,
-      storageKey: attachmentId,
-      createdBy: actorId,
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.insert(attachments).values({
+        id: attachmentId,
+        taskId: req.task_id,
+        filename: req.filename,
+        contentType: req.content_type,
+        sizeBytes: req.size_bytes,
+        status: 'pending',
+        url: null,
+        storageKey: attachmentId,
+        createdBy: actorId,
+      });
+      const [inserted] = await tx
+        .select()
+        .from(attachments)
+        .where(eq(attachments.id, attachmentId))
+        .limit(1);
+      const res: AttachmentCreateUploadRes = {
+        attachment: rowToAttachment(inserted!),
+        upload_url: uploadUrl,
+      };
+      await recordOperation(tx, {
+        operationId: req.operation_id,
+        actorId,
+        requestHash,
+        responseBody: res,
+      });
+      return res;
     });
-    const [inserted] = await tx
-      .select()
-      .from(attachments)
-      .where(eq(attachments.id, attachmentId))
-      .limit(1);
-    const res: AttachmentCreateUploadRes = {
-      attachment: rowToAttachment(inserted!),
-      upload_url: uploadUrl,
-    };
-    await recordOperation(tx, {
-      operationId: req.operation_id,
-      actorId,
-      requestHash,
-      responseBody: res,
-    });
-    return res;
-  });
-
-  return response;
+  } catch (err) {
+    const raced = await checkIdempotency(db, req.operation_id, requestHash);
+    if (raced !== null) return raced as AttachmentCreateUploadRes;
+    throw err;
+  }
 }
 
 /**
@@ -187,27 +191,31 @@ export async function finalize(
   const now = new Date();
   const downloadUrl = storage.downloadUrl(row.id);
 
-  const response = await db.transaction(async (tx) => {
-    await tx
-      .update(attachments)
-      .set({ status: 'ready', url: downloadUrl, finalizedAt: now })
-      .where(eq(attachments.id, req.attachment_id));
-    const [updated] = await tx
-      .select()
-      .from(attachments)
-      .where(eq(attachments.id, req.attachment_id))
-      .limit(1);
-    const res: AttachmentFinalizeRes = { attachment: rowToAttachment(updated!) };
-    await recordOperation(tx, {
-      operationId: req.operation_id,
-      actorId,
-      requestHash,
-      responseBody: res,
+  try {
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(attachments)
+        .set({ status: 'ready', url: downloadUrl, finalizedAt: now })
+        .where(eq(attachments.id, req.attachment_id));
+      const [updated] = await tx
+        .select()
+        .from(attachments)
+        .where(eq(attachments.id, req.attachment_id))
+        .limit(1);
+      const res: AttachmentFinalizeRes = { attachment: rowToAttachment(updated!) };
+      await recordOperation(tx, {
+        operationId: req.operation_id,
+        actorId,
+        requestHash,
+        responseBody: res,
+      });
+      return res;
     });
-    return res;
-  });
-
-  return response;
+  } catch (err) {
+    const raced = await checkIdempotency(db, req.operation_id, requestHash);
+    if (raced !== null) return raced as AttachmentFinalizeRes;
+    throw err;
+  }
 }
 
 /**
@@ -230,11 +238,19 @@ export async function getAttachment(
 /**
  * attachment.list — list all non-deleted ready attachments for a task,
  * ordered by created_at ascending. Pending attachments are excluded.
+ * Throws AttachmentTaskNotFoundError if the task does not exist.
  */
 export async function listAttachments(
   db: Db,
   { req }: { req: AttachmentListReq },
 ): Promise<AttachmentListRes> {
+  const taskRows = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.id, req.task_id))
+    .limit(1);
+  if (!taskRows[0]) throw new AttachmentTaskNotFoundError(req.task_id);
+
   const rows = await db
     .select()
     .from(attachments)
