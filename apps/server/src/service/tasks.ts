@@ -30,7 +30,7 @@
  *  └──────────────────┘
  */
 
-import { and, desc, eq, asc, inArray } from 'drizzle-orm';
+import { and, desc, eq, asc, inArray, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { events, tasks, workflowColumns, workflowTransitions } from '../db/schema.ts';
@@ -53,6 +53,8 @@ import {
   type WorkflowColumnsListRes,
   type TaskTransitionWorkflowReq,
   type TaskTransitionWorkflowRes,
+  type TaskReorderReq,
+  type TaskReorderRes,
 } from '../domain/index.ts';
 import {
   checkIdempotency,
@@ -335,6 +337,15 @@ export async function createTask(
         .limit(1);
       const defaultColumnId = defaultColRows[0]?.id ?? null;
 
+      let newRank = 1;
+      if (defaultColumnId !== null) {
+        const maxRankRow = await tx
+          .select({ maxRank: sql<number>`COALESCE(MAX(rank), 0)` })
+          .from(tasks)
+          .where(eq(tasks.workflowColumnId, defaultColumnId));
+        newRank = (maxRankRow[0]?.maxRank ?? 0) + 1;
+      }
+
       const [taskRow] = await tx
         .insert(tasks)
         .values({
@@ -349,6 +360,7 @@ export async function createTask(
           createdAt: now,
           updatedAt: now,
           workflowColumnId: defaultColumnId,
+          rank: newRank,
         })
         .returning();
 
