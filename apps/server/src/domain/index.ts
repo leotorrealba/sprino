@@ -66,6 +66,7 @@ export const TaskSchema = z.object({
   version: z.number().int().min(1),
   created_at: isoDateTime,
   updated_at: isoDateTime,
+  workflow_column_id: uuid.nullable(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -108,6 +109,46 @@ export const EventWithActorSchema = EventSchema.extend({
   }),
 });
 export type EventWithActor = z.infer<typeof EventWithActorSchema>;
+
+// ── D1: Workflow State Machine ────────────────────────────────────────────
+
+export const WorkflowColumnSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(80),
+  position: z.number().int().min(0),
+  maps_to_status: TaskStatusSchema,
+  is_default: z.boolean(),
+  created_at: isoDateTime,
+});
+export type WorkflowColumn = z.infer<typeof WorkflowColumnSchema>;
+
+export const WorkflowTransitionSchema = z.object({
+  from_column_id: uuid,
+  to_column_id: uuid,
+});
+export type WorkflowTransition = z.infer<typeof WorkflowTransitionSchema>;
+
+export const WorkflowColumnsListResSchema = z.object({
+  columns: z.array(WorkflowColumnSchema),
+  transitions: z.array(WorkflowTransitionSchema),
+});
+export type WorkflowColumnsListRes = z.infer<typeof WorkflowColumnsListResSchema>;
+
+export const TaskTransitionWorkflowReqSchema = z.object({
+  operation_id: uuid,
+  task_id: uuid,
+  to_column_id: uuid,
+  if_match: z.number().int().min(1),
+  notes: z.string().max(2048).optional(),
+});
+export type TaskTransitionWorkflowReq = z.infer<typeof TaskTransitionWorkflowReqSchema>;
+
+export const TaskTransitionWorkflowResSchema = z.object({
+  task: TaskSchema,
+  event: EventSchema,
+});
+export type TaskTransitionWorkflowRes = z.infer<typeof TaskTransitionWorkflowResSchema>;
 
 export const RepoRefSchema = z.object({
   kind: z.enum(['commit', 'branch', 'pr', 'file', 'issue']),

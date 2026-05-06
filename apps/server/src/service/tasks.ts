@@ -127,6 +127,7 @@ function rowToTask(r: TaskRow): Task {
     version: r.version,
     created_at: r.createdAt.toISOString(),
     updated_at: r.updatedAt.toISOString(),
+    workflow_column_id: r.workflowColumnId,
   };
 }
 

@@ -64,6 +64,7 @@ export const TaskSchema = z.object({
   version: z.number().int().min(1),
   created_at: isoDateTime,
   updated_at: isoDateTime,
+  workflow_column_id: uuid.nullable(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -73,6 +74,7 @@ export const EventKindSchema = z.enum([
   'assigned',
   'context_updated',
   'commented',
+  'workflow_transitioned',
 ]);
 export type EventKind = z.infer<typeof EventKindSchema>;
 
