@@ -98,6 +98,13 @@ export class WorkflowTransitionForbiddenError extends Error {
   }
 }
 
+export class TaskNotInColumnError extends Error {
+  constructor(public readonly taskId: string, public readonly columnId: string) {
+    super(`task ${taskId} is not in column ${columnId}`);
+    this.name = 'TaskNotInColumnError';
+  }
+}
+
 const RECENT_EVENTS_LIMIT = 20;
 
 // Tessera v0.0.x: agent_context payload soft-cap so a single task.get fits
@@ -410,15 +417,22 @@ export async function listTasks(
   db: Db,
   args: { req: TaskListReq },
 ): Promise<TaskListRes> {
-  // Bounds (limit ≤ 500, offset ≥ 0) are enforced by TaskListReqSchema.
-  // We only apply a default here when the caller didn't supply one.
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
+
+  const conditions = [eq(tasks.projectId, args.req.project_id)];
+  if (args.req.status && args.req.status.length > 0) {
+    conditions.push(inArray(tasks.status, args.req.status));
+  }
+  if (args.req.assignee_id) {
+    conditions.push(eq(tasks.assigneeId, args.req.assignee_id));
+  }
+
   const rows = await db
     .select()
     .from(tasks)
-    .where(eq(tasks.projectId, args.req.project_id))
-    .orderBy(asc(tasks.createdAt), asc(tasks.id))
+    .where(and(...conditions))
+    .orderBy(asc(tasks.rank), asc(tasks.id))
     .limit(limit)
     .offset(offset);
   return { tasks: rows.map(rowToTask) };
@@ -597,6 +611,12 @@ export async function transitionTaskWorkflow(
       throw new WorkflowColumnNotFoundError(args.req.to_column_id);
     }
 
+    const maxRankRow = await tx
+      .select({ maxRank: sql<number>`COALESCE(MAX(rank), 0)` })
+      .from(tasks)
+      .where(eq(tasks.workflowColumnId, args.req.to_column_id));
+    const transitionRank = (maxRankRow[0]?.maxRank ?? 0) + 1;
+
     // Transition guard. A null current column means this is a pre-D1 task
     // receiving its first column assignment — any target is allowed.
     if (current.workflowColumnId !== null) {
@@ -640,6 +660,7 @@ export async function transitionTaskWorkflow(
       .set({
         workflowColumnId: args.req.to_column_id,
         status: targetCol.mapsToStatus,
+        rank: transitionRank,
         version: current.version + 1,
         updatedAt: now,
       })
@@ -670,6 +691,90 @@ export async function transitionTaskWorkflow(
   } catch (err) {
     const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
     if (raced) return raced as TaskTransitionWorkflowRes;
+    throw err;
+  }
+}
+
+export async function reorderTask(
+  db: Db,
+  args: { req: TaskReorderReq; actorId: string },
+): Promise<TaskReorderRes> {
+  const requestHash = hashRequest(args.req);
+  const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
+  if (cached) return cached as TaskReorderRes;
+
+  try {
+    return await db.transaction(async (tx) => {
+      // Verify task exists and is in the requested column.
+      const taskRows = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, args.req.task_id))
+        .for('update');
+      const target = taskRows[0];
+      if (!target) throw new TaskNotFoundError(args.req.task_id);
+      if (target.workflowColumnId !== args.req.column_id) {
+        throw new TaskNotInColumnError(args.req.task_id, args.req.column_id);
+      }
+
+      // Fetch and lock all tasks in the column, ordered by current rank.
+      const colTasks = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.workflowColumnId, args.req.column_id))
+        .orderBy(asc(tasks.rank), asc(tasks.id))
+        .for('update');
+
+      // Build new order.
+      const without = colTasks.filter((t) => t.id !== args.req.task_id);
+      const movingTask = colTasks.find((t) => t.id === args.req.task_id)!;
+
+      let newOrder: typeof colTasks;
+      if (args.req.after_task_id === null) {
+        newOrder = [movingTask, ...without];
+      } else {
+        const anchorIdx = without.findIndex((t) => t.id === args.req.after_task_id);
+        if (anchorIdx === -1) {
+          throw new TaskNotInColumnError(args.req.after_task_id, args.req.column_id);
+        }
+        newOrder = [
+          ...without.slice(0, anchorIdx + 1),
+          movingTask,
+          ...without.slice(anchorIdx + 1),
+        ];
+      }
+
+      // Renumber 1-based and update all rows.
+      await Promise.all(
+        newOrder.map((t, i) =>
+          tx
+            .update(tasks)
+            .set({ rank: i + 1 })
+            .where(eq(tasks.id, t.id)),
+        ),
+      );
+
+      // Fetch the updated column in rank order.
+      const updated = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.workflowColumnId, args.req.column_id))
+        .orderBy(asc(tasks.rank), asc(tasks.id));
+
+      const response: TaskReorderRes = { tasks: updated.map(rowToTask) };
+
+      await recordOperation(tx, {
+        operationId: args.req.operation_id,
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
+
+      return response;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as TaskReorderRes;
     throw err;
   }
 }
