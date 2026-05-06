@@ -65,6 +65,7 @@ export const TaskSchema = z.object({
   created_at: isoDateTime,
   updated_at: isoDateTime,
   workflow_column_id: uuid.nullable(),
+  rank: z.number().int().min(0),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
