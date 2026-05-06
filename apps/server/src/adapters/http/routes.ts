@@ -38,6 +38,7 @@ import {
   TaskGetReqSchema,
   TaskListReqSchema,
   TaskUpdateStatusReqSchema,
+  TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
@@ -88,11 +89,15 @@ import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
   VersionMismatchError,
+  WorkflowColumnNotFoundError,
+  WorkflowTransitionForbiddenError,
   createTask,
   getTask,
   listRelatedTasks,
   listTaskEvents,
   listTasks,
+  listWorkflowColumns,
+  transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
 import {
@@ -154,6 +159,17 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  api.get('/projects/:id/workflow-columns', async (c) => {
+    try {
+      const res = await listWorkflowColumns(c.get('db'), {
+        projectId: c.req.param('id'),
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   // Sprino-specific list extension — see service/tasks.ts.listTasks.
   // Not exposed via /mcp to keep the canonical protocol minimal.
   api.get('/tasks', async (c) => {
@@ -201,6 +217,24 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       });
       const actor = c.get('actor');
       const res = await updateTaskStatus(c.get('db'), {
+        req,
+        actorId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/tasks/:id/transition', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskTransitionWorkflowReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await transitionTaskWorkflow(c.get('db'), {
         req,
         actorId: actor.id,
       });
@@ -769,6 +803,22 @@ function errorResponse(c: any, err: unknown): Response {
         task: err.currentTask,
       },
       409,
+    );
+  }
+  if (err instanceof WorkflowTransitionForbiddenError) {
+    return c.json(
+      {
+        error: 'workflow_transition_forbidden',
+        from_column_id: err.fromColumnId,
+        to_column_id: err.toColumnId,
+      },
+      422,
+    );
+  }
+  if (err instanceof WorkflowColumnNotFoundError) {
+    return c.json(
+      { error: 'workflow_column_not_found', column_id: err.columnId },
+      404,
     );
   }
   if (err instanceof IdempotencyConflictError) {
