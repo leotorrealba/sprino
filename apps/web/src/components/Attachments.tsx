@@ -36,14 +36,12 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const authHeaders = { authorization: `Bearer ${token}` };
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const r = await fetch(`/api/tasks/${taskId}/attachments`, {
-        headers: authHeaders,
+        headers: { authorization: `Bearer ${token}` },
       });
       if (!r.ok) throw new Error(`list failed: ${r.status}`);
       const j = (await r.json()) as { attachments: Attachment[] };
@@ -53,8 +51,6 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
     } finally {
       setLoading(false);
     }
-    // authHeaders is a stable object literal; including token in deps is correct
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, token]);
 
   useEffect(() => {
@@ -65,9 +61,10 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
     setUploading(true);
     setUploadError(null);
     try {
+      const authHeader = { authorization: `Bearer ${token}` };
       const createRes = await fetch('/api/attachments', {
         method: 'POST',
-        headers: { ...authHeaders, 'content-type': 'application/json' },
+        headers: { ...authHeader, 'content-type': 'application/json' },
         body: JSON.stringify({
           operation_id: uuidv7(),
           task_id: taskId,
@@ -89,12 +86,12 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
       const putHeaders: Record<string, string> = {
         'content-type': file.type || 'application/octet-stream',
       };
-      if (upload_url.startsWith('/')) Object.assign(putHeaders, authHeaders);
+      if (upload_url.startsWith('/')) Object.assign(putHeaders, authHeader);
 
       const putRes = await fetch(upload_url, {
         method: 'PUT',
         headers: putHeaders,
-        body: await file.arrayBuffer(),
+        body: file,
       });
       if (!putRes.ok) {
         throw new Error(`upload failed: ${putRes.status} ${await putRes.text()}`);
@@ -102,7 +99,7 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
 
       const finalizeRes = await fetch(`/api/attachments/${attachment.id}/finalize`, {
         method: 'POST',
-        headers: { ...authHeaders, 'content-type': 'application/json' },
+        headers: { ...authHeader, 'content-type': 'application/json' },
         body: JSON.stringify({
           operation_id: uuidv7(),
           attachment_id: attachment.id,
@@ -124,7 +121,12 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
   const handleDownload = async (attachment: Attachment) => {
     if (!attachment.url) return;
     try {
-      const r = await fetch(attachment.url, { headers: authHeaders });
+      // Only send auth header for same-origin URLs; presigned S3 URLs must not
+      // receive the Bearer token (conflicting auth triggers CORS/preflight errors).
+      const headers: Record<string, string> = attachment.url.startsWith('/')
+        ? { authorization: `Bearer ${token}` }
+        : {};
+      const r = await fetch(attachment.url, { headers });
       if (!r.ok) throw new Error(`download failed: ${r.status}`);
       const blob = await r.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -132,7 +134,8 @@ export function Attachments({ token, taskId }: AttachmentsProps) {
       a.href = objectUrl;
       a.download = attachment.filename;
       a.click();
-      URL.revokeObjectURL(objectUrl);
+      // Defer revocation so the browser has a tick to start consuming the URL.
+      queueMicrotask(() => URL.revokeObjectURL(objectUrl));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

@@ -121,7 +121,7 @@ const TOOL_DEFINITIONS = [
           maxLength: 64,
         },
         display_name: { type: 'string', minLength: 1, maxLength: 200 },
-        repo_path: { type: ['string', 'null'] },
+        repo_path: { type: ['string', 'null'], minLength: 1 },
       },
     },
   },

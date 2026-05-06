@@ -427,10 +427,18 @@ export function App() {
                   }`}
                 >
                   <div
+                    role="button"
+                    tabIndex={0}
                     className="flex cursor-pointer items-start justify-between gap-4"
                     onClick={() =>
                       setSelectedTaskId((prev) => (prev === t.id ? null : t.id))
                     }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedTaskId((prev) => (prev === t.id ? null : t.id));
+                      }
+                    }}
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{t.title}</p>

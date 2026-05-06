@@ -107,7 +107,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   // ── project.create (Tessera v0.1.5) ─────────────────────────────────────
   api.post('/projects', async (c) => {
     try {
-      const body = await c.req.json();
+      const body = await c.req.json().catch(() => ({}));
       const req = ProjectCreateReqSchema.parse(body);
       const actor = c.get('actor');
       const res = await createProject(c.get('db'), {

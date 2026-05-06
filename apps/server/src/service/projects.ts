@@ -170,8 +170,6 @@ export async function createProject(
   db: Db,
   { req, actorId }: { req: ProjectCreateReq; actorId: string },
 ): Promise<ProjectCreateRes> {
-  void actorId; // reserved for future audit log; not stored in v0.1.5
-
   const requestHash = hashRequest(req);
   const cached = await checkIdempotency(db, req.operation_id, requestHash);
   if (cached !== null) return cached as ProjectCreateRes;
@@ -209,8 +207,18 @@ export async function createProject(
       return res;
     });
   } catch (err) {
+    // Idempotency re-check covers concurrent creates with the same operation_id.
     const raced = await checkIdempotency(db, req.operation_id, requestHash);
     if (raced !== null) return raced as ProjectCreateRes;
+    // Unique-constraint violation from a concurrent create with a different
+    // operation_id hitting the same slug → surface as a clean 409.
+    if (
+      err instanceof Error &&
+      err.message.includes('unique') &&
+      err.message.toLowerCase().includes('slug')
+    ) {
+      throw new ProjectSlugConflictError(req.slug);
+    }
     throw err;
   }
 }

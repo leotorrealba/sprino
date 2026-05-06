@@ -198,10 +198,6 @@ export const EventListResSchema = z.object({
 export type EventListRes = z.infer<typeof EventListResSchema>;
 
 // ────────────────────────────────────────────────────────────────────────
-// Attachment resource + verbs (Tessera v0.1.4)
-// ────────────────────────────────────────────────────────────────────────
-
-// ────────────────────────────────────────────────────────────────────────
 // project.create (Tessera v0.1.5)
 // ────────────────────────────────────────────────────────────────────────
 
@@ -284,4 +280,4 @@ export const AttachmentListResSchema = z.object({
 });
 export type AttachmentListRes = z.infer<typeof AttachmentListResSchema>;
 
-export const PROTOCOL_VERSION = 'tessera/v0.1.4';
+export const PROTOCOL_VERSION = 'tessera/v0.1.5';
