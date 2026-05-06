@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. Latest release: [**v0.0.9**](https://github.com/leotorrealba/sprino/releases/tag/v0.0.9) — actor lifecycle (Tessera v0.1.2), in-app Members tab, two-source actor model.
+**Status:** pre-alpha. Active development. Latest release: [**v0.1.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.1.0) — full Tessera v0.1.5 conformance: actor lifecycle (register/list/get/revoke/heartbeat/deactivate), attachment upload lifecycle, project creation, frontend attachment UI. First release with a complete Tessera verb surface.
 
 ## Why
 
@@ -41,8 +41,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.6** (phase 6) — buffer + hardening: pagination contract on `events.list` / `tasks.list` / `agents.list`, SSE realtime fallback, nightly `pg_dump` backup sidecar with `docs/RESTORE.md` playbook
 - **v0.0.7** (phase 7) — 30-minute self-host bundle: server + web Dockerfiles, `bootstrap.sh`, `docs/TOKEN-ROTATION.md`, README walkthrough
 - **v0.0.9** (phase 9) — Tessera v0.1.2 actor lifecycle: `actor.register` / `list` / `get` / `revoke_token` verbs, in-app Members tab with rotate/revoke, two-source actor model (env + db) with break-glass recovery, single-SQL auth path, race-safe rotate
-- **v0.0.x** — vertical slices, one per phase, through phase 8
-- **v0.1.0** (phase 8) — first public release, self-host walkthrough, Tessera v0.1 milestone
+- **v0.1.0** ✅ shipped — Tessera v0.1.5 full surface: agent registration and session lifecycle (`actor.heartbeat`, `actor.deactivate`), attachment upload lifecycle (create_upload → PUT → finalize), project creation (`project.create`, slug uniqueness), frontend attachment UI, keyboard-accessible task cards. All 16 Tessera verbs implemented; 233+ conformance tests pass.
 
 ## Self-host (30 minutes, end-to-end)
 
