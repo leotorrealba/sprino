@@ -34,6 +34,7 @@ import {
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskUpdateStatusReqSchema,
+  TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
@@ -66,8 +67,11 @@ import {
 import {
   TaskNotFoundError,
   VersionMismatchError,
+  WorkflowColumnNotFoundError,
+  WorkflowTransitionForbiddenError,
   createTask,
   getTask,
+  transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
 import {
@@ -354,6 +358,23 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.task.transition_workflow',
+    description:
+      "Move a task to a different workflow column. Validates the transition against the project's allowed-transition graph. Idempotent via operation_id; concurrency-safe via if_match.",
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'to_column_id', 'if_match'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        to_column_id: { type: 'string', format: 'uuid' },
+        if_match: { type: 'integer', minimum: 1 },
+        notes: { type: 'string', maxLength: 2048 },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -448,6 +469,11 @@ async function callTool(
     case 'sprino.task.update_status': {
       const req = TaskUpdateStatusReqSchema.parse(args);
       const res = await updateTaskStatus(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.transition_workflow': {
+      const req = TaskTransitionWorkflowReqSchema.parse(args);
+      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id });
       return wrapToolResult(res);
     }
     case 'sprino.actor.register': {
@@ -563,6 +589,17 @@ function translateError(
   if (err instanceof VersionMismatchError) {
     return rpcError(id, -32009, 'version_mismatch', {
       task: err.currentTask,
+    });
+  }
+  if (err instanceof WorkflowTransitionForbiddenError) {
+    return rpcError(id, -32009, 'workflow_transition_forbidden', {
+      from_column_id: err.fromColumnId,
+      to_column_id: err.toColumnId,
+    });
+  }
+  if (err instanceof WorkflowColumnNotFoundError) {
+    return rpcError(id, -32004, 'workflow_column_not_found', {
+      column_id: err.columnId,
     });
   }
   if (err instanceof IdempotencyConflictError) {
