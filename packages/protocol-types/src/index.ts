@@ -197,4 +197,91 @@ export const EventListResSchema = z.object({
 });
 export type EventListRes = z.infer<typeof EventListResSchema>;
 
-export const PROTOCOL_VERSION = 'tessera/v0.0.2';
+// ────────────────────────────────────────────────────────────────────────
+// Attachment resource + verbs (Tessera v0.1.4)
+// ────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────
+// project.create (Tessera v0.1.5)
+// ────────────────────────────────────────────────────────────────────────
+
+export const ProjectCreateReqSchema = z.object({
+  operation_id: uuid,
+  slug: projectSlug,
+  display_name: z.string().min(1).max(200),
+  repo_path: z.string().min(1).nullable().optional(),
+});
+export type ProjectCreateReq = z.infer<typeof ProjectCreateReqSchema>;
+
+export const ProjectCreateResSchema = z.object({
+  project: ProjectSchema,
+});
+export type ProjectCreateRes = z.infer<typeof ProjectCreateResSchema>;
+
+// ────────────────────────────────────────────────────────────────────────
+// Attachment resource + verbs (Tessera v0.1.4)
+// ────────────────────────────────────────────────────────────────────────
+
+export const AttachmentStatusSchema = z.enum(['pending', 'ready']);
+export type AttachmentStatus = z.infer<typeof AttachmentStatusSchema>;
+
+export const AttachmentSchema = z.object({
+  id: uuid,
+  task_id: uuid,
+  filename: z.string().min(1).max(255),
+  content_type: z.string().min(1).max(127),
+  size_bytes: z.number().int().min(1),
+  status: AttachmentStatusSchema,
+  url: z.string().min(1).nullable(),
+  created_by: uuid,
+  created_at: isoDateTime,
+});
+export type Attachment = z.infer<typeof AttachmentSchema>;
+
+export const AttachmentCreateUploadReqSchema = z.object({
+  operation_id: uuid,
+  task_id: uuid,
+  filename: z.string().min(1).max(255),
+  content_type: z.string().min(1).max(127),
+  size_bytes: z.number().int().min(1),
+});
+export type AttachmentCreateUploadReq = z.infer<typeof AttachmentCreateUploadReqSchema>;
+
+export const AttachmentCreateUploadResSchema = z.object({
+  attachment: AttachmentSchema,
+  upload_url: z.string().min(1),
+});
+export type AttachmentCreateUploadRes = z.infer<typeof AttachmentCreateUploadResSchema>;
+
+export const AttachmentFinalizeReqSchema = z.object({
+  operation_id: uuid,
+  attachment_id: uuid,
+});
+export type AttachmentFinalizeReq = z.infer<typeof AttachmentFinalizeReqSchema>;
+
+export const AttachmentFinalizeResSchema = z.object({
+  attachment: AttachmentSchema,
+});
+export type AttachmentFinalizeRes = z.infer<typeof AttachmentFinalizeResSchema>;
+
+export const AttachmentGetReqSchema = z.object({ attachment_id: uuid });
+export type AttachmentGetReq = z.infer<typeof AttachmentGetReqSchema>;
+
+export const AttachmentGetResSchema = z.object({
+  attachment: AttachmentSchema,
+});
+export type AttachmentGetRes = z.infer<typeof AttachmentGetResSchema>;
+
+export const AttachmentListReqSchema = z.object({
+  task_id: uuid,
+  limit: z.number().int().min(1).max(100).optional(),
+  offset: z.number().int().min(0).optional(),
+});
+export type AttachmentListReq = z.infer<typeof AttachmentListReqSchema>;
+
+export const AttachmentListResSchema = z.object({
+  attachments: z.array(AttachmentSchema),
+});
+export type AttachmentListRes = z.infer<typeof AttachmentListResSchema>;
+
+export const PROTOCOL_VERSION = 'tessera/v0.1.4';

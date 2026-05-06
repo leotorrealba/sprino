@@ -32,6 +32,7 @@ import {
   AttachmentFinalizeReqSchema,
   AttachmentListReqSchema,
   EventListReqSchema,
+  ProjectCreateReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
@@ -56,6 +57,8 @@ import {
 import { storage } from '../../service/attachments/instance.ts';
 import {
   ProjectNotFoundError,
+  ProjectSlugConflictError,
+  createProject,
   getProject,
   listProjects,
 } from '../../service/projects.ts';
@@ -100,6 +103,22 @@ import { ZodError } from 'zod';
 
 export function buildHttpRoutes(): Hono<AuthEnv> {
   const api = new Hono<AuthEnv>();
+
+  // ── project.create (Tessera v0.1.5) ─────────────────────────────────────
+  api.post('/projects', async (c) => {
+    try {
+      const body = await c.req.json();
+      const req = ProjectCreateReqSchema.parse(body);
+      const actor = c.get('actor');
+      const res = await createProject(c.get('db'), {
+        req,
+        actorId: actor.id,
+      });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
 
   api.get('/projects', async (c) => {
     try {
@@ -731,6 +750,9 @@ function errorResponse(c: any, err: unknown): Response {
       { error: 'validation_error', details: err.issues },
       400,
     );
+  }
+  if (err instanceof ProjectSlugConflictError) {
+    return c.json({ error: 'slug_conflict', slug: err.slug }, 409);
   }
   if (err instanceof ProjectNotFoundError) {
     return c.json({ error: 'project_not_found', ref: err.ref }, 404);

@@ -377,6 +377,7 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       'sprino.attachment.finalize',
       'sprino.attachment.get',
       'sprino.attachment.list',
+      'sprino.project.create',
       'sprino.project.get',
       'sprino.project.list',
       'sprino.task.create',
@@ -2520,5 +2521,93 @@ describe('Tessera v0.1.4 conformance — attachment happy path sequence', () => 
     };
     expect(getBody.result.structuredContent.attachment.id).toBe(attId);
     expect(getBody.result.structuredContent.attachment.status).toBe('pending');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Tessera C5 — project.create conformance (v0.1.5)
+// ────────────────────────────────────────────────────────────────────────
+
+describe('Tessera C5 — project.create (v0.1.5)', () => {
+  it('project-create-happy: POST /api/projects creates a project', async () => {
+    const app = buildTestApp();
+    const req = readFixture('project-create-happy.req.json') as {
+      operation_id: string;
+      slug: string;
+      display_name: string;
+      repo_path: string | null;
+    };
+    const expectedRes = readFixture('project-create-happy.res.json') as {
+      project: Record<string, unknown>;
+    };
+
+    const resp = await app.fetch(
+      new Request('http://test/api/projects', bearer(req)),
+    );
+    expect(resp.status).toBe(201);
+    const body = (await resp.json()) as { project: Record<string, unknown> };
+
+    expect(body.project.slug).toBe(expectedRes.project.slug);
+    expect(body.project.display_name).toBe(expectedRes.project.display_name);
+    expect(body.project.repo_path).toBe(expectedRes.project.repo_path);
+    expect(body.project.id).toMatch(UUID_RE);
+    expect(body.project.created_at).toMatch(ISO_DATETIME_RE);
+  });
+
+  it('project-create-operation-replay: same operation_id returns cached response', async () => {
+    const app = buildTestApp();
+    const req = readFixture('project-create-operation-replay.req.json');
+
+    const first = await app.fetch(
+      new Request('http://test/api/projects', bearer(req)),
+    );
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { project: Record<string, unknown> };
+
+    const second = await app.fetch(
+      new Request('http://test/api/projects', bearer(req)),
+    );
+    expect(second.status).toBe(201);
+    const secondBody = (await second.json()) as { project: Record<string, unknown> };
+
+    expect(secondBody.project.id).toBe(firstBody.project.id);
+    expect(secondBody.project.slug).toBe(firstBody.project.slug);
+    expect(secondBody.project.created_at).toBe(firstBody.project.created_at);
+  });
+
+  it('project-create-slug-conflict: duplicate slug returns 409 slug_conflict', async () => {
+    const app = buildTestApp();
+    const req = readFixture('project-create-slug-conflict.req.json') as {
+      slug: string;
+    };
+    const expectedRes = readFixture('project-create-slug-conflict.res.json') as {
+      _error: { status: number; code: string; details: { slug: string } };
+    };
+
+    // slug 'sprino' is seeded by the test harness (FIXTURE_PROJECT_ID)
+    const resp = await app.fetch(
+      new Request('http://test/api/projects', bearer(req)),
+    );
+    expect(resp.status).toBe(expectedRes._error.status);
+    expect(resp.status).toBe(409);
+    const body = (await resp.json()) as { error: string; slug: string };
+    expect(body.error).toBe('slug_conflict');
+    expect(body.slug).toBe(req.slug);
+  });
+
+  it('project-create-validation-error: invalid slug returns 400', async () => {
+    const app = buildTestApp();
+    const req = readFixture('project-create-validation-error.req.json');
+    const expectedRes = readFixture(
+      'project-create-validation-error.res.json',
+    ) as { _error: { status: number; code: string } };
+
+    const resp = await app.fetch(
+      new Request('http://test/api/projects', bearer(req)),
+    );
+    expect(resp.status).toBe(expectedRes._error.status);
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: string };
+    expect(body.error).toBe('validation_error');
   });
 });

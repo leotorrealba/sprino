@@ -537,3 +537,22 @@ export const AttachmentListResSchema = z.object({
   attachments: z.array(AttachmentSchema),
 });
 export type AttachmentListRes = z.infer<typeof AttachmentListResSchema>;
+
+// ────────────────────────────────────────────────────────────────────────
+// project.create (Tessera v0.1.5)
+// ────────────────────────────────────────────────────────────────────────
+
+export const ProjectCreateReqSchema = z
+  .object({
+    operation_id: uuid,
+    slug: projectSlug,
+    display_name: z.string().min(1).max(200),
+    repo_path: z.string().min(1).nullable().optional(),
+  })
+  .strict();
+export type ProjectCreateReq = z.infer<typeof ProjectCreateReqSchema>;
+
+export const ProjectCreateResSchema = z.object({
+  project: ProjectSchema,
+});
+export type ProjectCreateRes = z.infer<typeof ProjectCreateResSchema>;
