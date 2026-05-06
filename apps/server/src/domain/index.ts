@@ -530,7 +530,7 @@ export type AttachmentGetRes = z.infer<typeof AttachmentGetResSchema>;
 // attachment.list
 export const AttachmentListReqSchema = z
   .object({ task_id: uuid })
-  .strict();
+  .merge(paginationSchema(MAX_LIMITS.attachments));
 export type AttachmentListReq = z.infer<typeof AttachmentListReqSchema>;
 
 export const AttachmentListResSchema = z.object({

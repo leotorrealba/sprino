@@ -26,6 +26,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { attachments, tasks } from '../db/schema.ts';
 import type { AttachmentRow } from '../db/schema.ts';
+import { DEFAULT_LIMIT } from '../domain/pagination.ts';
 import type {
   Attachment,
   AttachmentCreateUploadReq,
@@ -251,6 +252,9 @@ export async function listAttachments(
     .limit(1);
   if (!taskRows[0]) throw new AttachmentTaskNotFoundError(req.task_id);
 
+  const limit = req.limit ?? DEFAULT_LIMIT;
+  const offset = req.offset ?? 0;
+
   const rows = await db
     .select()
     .from(attachments)
@@ -261,6 +265,8 @@ export async function listAttachments(
         isNull(attachments.deletedAt),
       ),
     )
-    .orderBy(asc(attachments.createdAt));
+    .orderBy(asc(attachments.createdAt))
+    .limit(limit)
+    .offset(offset);
   return { attachments: rows.map(rowToAttachment) };
 }

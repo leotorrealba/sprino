@@ -463,6 +463,56 @@ describe('attachment HTTP adapter (C3-P2)', () => {
     expect(json.attachments[0]!.id).toBe(attachment.id);
   });
 
+  it('GET /api/tasks/:id/attachments?limit=1 → returns at most 1 attachment', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    for (const filename of ['a.pdf', 'b.pdf']) {
+      const createResp = await app.fetch(
+        new Request('http://test/api/attachments', bearer(makeBody({ filename }))),
+      );
+      const { attachment, upload_url } = (await createResp.json()) as {
+        attachment: { id: string };
+        upload_url: string;
+      };
+      await app.fetch(
+        new Request(`http://test${upload_url}`, {
+          method: 'PUT',
+          headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, 'content-type': 'application/pdf' },
+          body: new Uint8Array([0x25]),
+        }),
+      );
+      await app.fetch(
+        new Request(
+          `http://test/api/attachments/${attachment.id}/finalize`,
+          bearer({ operation_id: uuidv7() }),
+        ),
+      );
+    }
+
+    const resp = await app.fetch(
+      new Request(`http://test/api/tasks/${FIXTURE_TASK_ID}/attachments?limit=1`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const json = (await resp.json()) as { attachments: unknown[] };
+    expect(json.attachments).toHaveLength(1);
+  });
+
+  it('GET /api/tasks/:id/attachments?limit=0 → 400 validation_error', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+    const resp = await app.fetch(
+      new Request(`http://test/api/tasks/${FIXTURE_TASK_ID}/attachments?limit=0`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(resp.status).toBe(400);
+    const json = (await resp.json()) as Record<string, unknown>;
+    expect(json.error).toBe('validation_error');
+  });
+
   it('GET /api/tasks/:id/attachments → 404 for unknown task_id', async () => {
     const app = buildTestApp();
     const resp = await app.fetch(

@@ -30,6 +30,7 @@ import {
   AgentListReqSchema,
   AttachmentCreateUploadReqSchema,
   AttachmentFinalizeReqSchema,
+  AttachmentListReqSchema,
   EventListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
@@ -498,9 +499,12 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   api.get('/tasks/:id/attachments', async (c) => {
     try {
-      const res = await listAttachments(c.get('db'), {
-        req: { task_id: c.req.param('id') },
+      const req = AttachmentListReqSchema.parse({
+        task_id: c.req.param('id'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
       });
+      const res = await listAttachments(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
