@@ -37,7 +37,7 @@ describe('D1-P1: workflow state persistence', () => {
       .select()
       .from(workflowColumns)
       .where(eq(workflowColumns.projectId, FIXTURE_PROJECT_ID));
-    const defaults = cols.filter((c) => c.isDefault);
+    const defaults = cols.filter((c: { isDefault: boolean; name: string }) => c.isDefault);
     expect(defaults).toHaveLength(1);
     expect(defaults[0]!.name).toBe('Backlog');
   });
@@ -83,7 +83,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
     });
     expect(columns).toHaveLength(4);
     expect(transitions).toHaveLength(4);
-    expect(columns.map((c) => c.name)).toEqual(
+    expect(columns.map((c: { name: string }) => c.name)).toEqual(
       expect.arrayContaining(['Backlog', 'In Progress', 'In Review', 'Done']),
     );
   });
@@ -91,7 +91,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
   it('valid transition (Backlog → In Progress) succeeds', async () => {
     const task = await setupTask();
     const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
-    const inProgress = columns.find((c) => c.name === 'In Progress')!;
+    const inProgress = columns.find((c: { name: string }) => c.name === 'In Progress')!;
 
     const res = await transitionTaskWorkflow(db, {
       req: {
@@ -113,7 +113,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
   it('invalid transition (Backlog → Done) throws WorkflowTransitionForbiddenError', async () => {
     const task = await setupTask();
     const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
-    const done = columns.find((c) => c.name === 'Done')!;
+    const done = columns.find((c: { name: string }) => c.name === 'Done')!;
 
     await expect(
       transitionTaskWorkflow(db, {
@@ -146,7 +146,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
   it('version mismatch throws VersionMismatchError', async () => {
     const task = await setupTask();
     const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
-    const inProgress = columns.find((c) => c.name === 'In Progress')!;
+    const inProgress = columns.find((c: { name: string }) => c.name === 'In Progress')!;
 
     await expect(
       transitionTaskWorkflow(db, {
@@ -164,7 +164,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
   it('transition is idempotent via operation_id', async () => {
     const task = await setupTask();
     const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
-    const inProgress = columns.find((c) => c.name === 'In Progress')!;
+    const inProgress = columns.find((c: { name: string }) => c.name === 'In Progress')!;
     const opId = uuidv7();
 
     const res1 = await transitionTaskWorkflow(db, {
@@ -187,7 +187,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
     await db.update(taskTable).set({ workflowColumnId: null }).where(eq(taskTable.id, task.id));
 
     const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
-    const done = columns.find((c) => c.name === 'Done')!;
+    const done = columns.find((c: { name: string }) => c.name === 'Done')!;
 
     // Backlog→Done would normally be forbidden, but null current column bypasses guard
     const res = await transitionTaskWorkflow(db, {
@@ -230,7 +230,7 @@ describe('D1-P3: HTTP adapter', () => {
         headers: { Authorization: `Bearer ${FIXTURE_TOKEN}` },
       }),
     );
-    return (await res.json()) as { columns: Array<{ id: string; name: string }>; transitions: Array<{ from_column_id: string; to_column_id: string }> };
+    return (await res.json()) as { columns: { id: string; name: string }[]; transitions: { from_column_id: string; to_column_id: string }[] };
   }
 
   it('GET /api/projects/:id/workflow-columns returns 200 with columns and transitions', async () => {
@@ -250,7 +250,7 @@ describe('D1-P3: HTTP adapter', () => {
     const app = buildTestApp();
     const { task } = await createTaskViaApi(app);
     const { columns } = await getColumns(app);
-    const inProgress = columns.find((c) => c.name === 'In Progress')!;
+    const inProgress = columns.find((c: { name: string }) => c.name === 'In Progress')!;
 
     const res = await app.fetch(
       new Request(`http://test/api/tasks/${task.id}/transition`, {
@@ -276,7 +276,7 @@ describe('D1-P3: HTTP adapter', () => {
     const app = buildTestApp();
     const { task } = await createTaskViaApi(app);
     const { columns } = await getColumns(app);
-    const done = columns.find((c) => c.name === 'Done')!;
+    const done = columns.find((c: { name: string }) => c.name === 'Done')!;
 
     const res = await app.fetch(
       new Request(`http://test/api/tasks/${task.id}/transition`, {
@@ -299,7 +299,7 @@ describe('D1-P3: HTTP adapter', () => {
     const app = buildTestApp();
     const { task } = await createTaskViaApi(app);
     const { columns } = await getColumns(app);
-    const inProgress = columns.find((c) => c.name === 'In Progress')!;
+    const inProgress = columns.find((c: { name: string }) => c.name === 'In Progress')!;
 
     const res = await app.fetch(
       new Request(`http://test/api/tasks/${task.id}/transition`, {
