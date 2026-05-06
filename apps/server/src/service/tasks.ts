@@ -554,9 +554,10 @@ export async function transitionTaskWorkflow(
   const eventId = uuidv7();
   const now = new Date();
 
-  return await db.transaction(async (tx) => {
-    // Lock task row to prevent concurrent version increments.
-    const taskRows = await tx
+  try {
+    return await db.transaction(async (tx) => {
+      // Lock task row to prevent concurrent version increments.
+      const taskRows = await tx
       .select()
       .from(tasks)
       .where(eq(tasks.id, args.req.task_id))
@@ -653,4 +654,9 @@ export async function transitionTaskWorkflow(
 
     return response;
   });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as TaskTransitionWorkflowRes;
+    throw err;
+  }
 }
