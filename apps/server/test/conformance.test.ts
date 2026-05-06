@@ -31,9 +31,11 @@ import {
   FIXTURE_AGENT_ID,
   FIXTURE_AGENT_TOKEN,
   FIXTURE_PROJECT_ID,
+  FIXTURE_TASK_ID,
   FIXTURE_TOKEN,
   buildTestApp,
   seedDbActor,
+  seedFixtureTask,
 } from './setup.ts';
 
 const FIXTURE_DIR = path.resolve(
@@ -371,6 +373,10 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       'sprino.actor.list',
       'sprino.actor.register',
       'sprino.actor.revoke_token',
+      'sprino.attachment.create_upload',
+      'sprino.attachment.finalize',
+      'sprino.attachment.get',
+      'sprino.attachment.list',
       'sprino.project.get',
       'sprino.project.list',
       'sprino.task.create',
@@ -2267,4 +2273,252 @@ describe('Tessera B6 — fixture gap coverage', () => {
       expect(body.agent_context.next_page_tokens).toHaveProperty(key);
     }
   }, 30_000);
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Tessera v0.1.4 — attachment conformance.
+//
+// The fixture sequence is: create_upload → PUT binary → finalize → get → list.
+// Fixture attachment.id and timestamps are relaxed (server generates them);
+// all other fields including status, filename, task_id, created_by are exact.
+// ───────────────────────────────────────────────────────────────────────
+
+describe('Tessera v0.1.4 conformance — attachment happy path sequence', () => {
+  it('runs create_upload → PUT binary → finalize → get → list against canonical fixtures', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    // ── step 1: attachment.create_upload ───────────────────────────────
+    const createReq = readFixture(
+      'attachment-create-upload-happy.req.json',
+    ) as Record<string, unknown>;
+    const expectedCreate = readFixture(
+      'attachment-create-upload-happy.res.json',
+    ) as {
+      attachment: Record<string, unknown>;
+      upload_url: string;
+    };
+
+    const createResp = await app.fetch(
+      new Request('http://test/api/attachments', bearer(createReq)),
+    );
+    expect(createResp.status).toBe(201);
+    const createJson = (await createResp.json()) as {
+      attachment: Record<string, unknown>;
+      upload_url: string;
+    };
+
+    // Server generates its own id — we capture it and use it throughout.
+    const attId = createJson.attachment.id as string;
+    expect(attId).toMatch(UUID_RE);
+    expect(createJson.attachment.task_id).toBe(
+      expectedCreate.attachment.task_id,
+    );
+    expect(createJson.attachment.filename).toBe(
+      expectedCreate.attachment.filename,
+    );
+    expect(createJson.attachment.content_type).toBe(
+      expectedCreate.attachment.content_type,
+    );
+    expect(createJson.attachment.size_bytes).toBe(
+      expectedCreate.attachment.size_bytes,
+    );
+    expect(createJson.attachment.status).toBe('pending');
+    expect(createJson.attachment.url).toBeNull();
+    expect(createJson.attachment.created_by).toBe(FIXTURE_ACTOR_ID);
+    expect(createJson.attachment.created_at).toMatch(ISO_DATETIME_RE);
+    expect(createJson.upload_url).toBe(`/api/attachments/${attId}/upload`);
+
+    // ── step 2: PUT binary to upload_url ───────────────────────────────
+    const uploadResp = await app.fetch(
+      new Request(`http://test${createJson.upload_url}`, {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${FIXTURE_TOKEN}`,
+          'content-type': 'image/png',
+        },
+        body: new Uint8Array(42187).fill(0x00), // 42187 bytes to match size_bytes
+      }),
+    );
+    expect(uploadResp.status).toBe(204);
+
+    // ── step 3: attachment.finalize ────────────────────────────────────
+    const finalizeReq = readFixture(
+      'attachment-finalize-happy.req.json',
+    ) as Record<string, unknown>;
+    const expectedFinalize = readFixture(
+      'attachment-finalize-happy.res.json',
+    ) as { attachment: Record<string, unknown> };
+
+    const finalizeResp = await app.fetch(
+      new Request(
+        `http://test/api/attachments/${attId}/finalize`,
+        bearer({ operation_id: finalizeReq.operation_id }),
+      ),
+    );
+    expect(finalizeResp.status).toBe(200);
+    const finalizeJson = (await finalizeResp.json()) as {
+      attachment: Record<string, unknown>;
+    };
+
+    expect(finalizeJson.attachment.id).toBe(attId);
+    expect(finalizeJson.attachment.status).toBe(
+      expectedFinalize.attachment.status,
+    );
+    expect(finalizeJson.attachment.status).toBe('ready');
+    expect(finalizeJson.attachment.url).toBe(`/api/attachments/${attId}/download`);
+    expect(finalizeJson.attachment.task_id).toBe(
+      expectedFinalize.attachment.task_id,
+    );
+    expect(finalizeJson.attachment.filename).toBe(
+      expectedFinalize.attachment.filename,
+    );
+    expect(finalizeJson.attachment.content_type).toBe(
+      expectedFinalize.attachment.content_type,
+    );
+    expect(finalizeJson.attachment.size_bytes).toBe(
+      expectedFinalize.attachment.size_bytes,
+    );
+    expect(finalizeJson.attachment.created_by).toBe(FIXTURE_ACTOR_ID);
+    expect(finalizeJson.attachment.created_at).toMatch(ISO_DATETIME_RE);
+
+    // ── step 4: attachment.get ─────────────────────────────────────────
+    const expectedGet = readFixture(
+      'attachment-get-happy.res.json',
+    ) as { attachment: Record<string, unknown> };
+
+    const getResp = await app.fetch(
+      new Request(`http://test/api/attachments/${attId}`, {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(getResp.status).toBe(200);
+    const getJson = (await getResp.json()) as {
+      attachment: Record<string, unknown>;
+    };
+
+    expect(getJson.attachment.id).toBe(attId);
+    expect(getJson.attachment.status).toBe(expectedGet.attachment.status);
+    expect(getJson.attachment.url).toBe(`/api/attachments/${attId}/download`);
+    expect(getJson.attachment.filename).toBe(expectedGet.attachment.filename);
+    expect(getJson.attachment.task_id).toBe(expectedGet.attachment.task_id);
+    expect(getJson.attachment.created_by).toBe(FIXTURE_ACTOR_ID);
+
+    // ── step 5: attachment.list ────────────────────────────────────────
+    const expectedList = readFixture(
+      'attachment-list-happy.res.json',
+    ) as { attachments: Array<Record<string, unknown>> };
+
+    const listResp = await app.fetch(
+      new Request(
+        `http://test/api/tasks/${FIXTURE_TASK_ID}/attachments`,
+        { headers: { authorization: `Bearer ${FIXTURE_TOKEN}` } },
+      ),
+    );
+    expect(listResp.status).toBe(200);
+    const listJson = (await listResp.json()) as {
+      attachments: Array<Record<string, unknown>>;
+    };
+
+    expect(listJson.attachments).toHaveLength(expectedList.attachments.length);
+    expect(listJson.attachments).toHaveLength(1);
+    const listedAtt = listJson.attachments[0]!;
+    expect(listedAtt.id).toBe(attId);
+    expect(listedAtt.status).toBe('ready');
+    expect(listedAtt.url).toBe(`/api/attachments/${attId}/download`);
+    expect(listedAtt.filename).toBe(expectedList.attachments[0]!.filename);
+    expect(listedAtt.task_id).toBe(FIXTURE_TASK_ID);
+    expect(listedAtt.created_by).toBe(FIXTURE_ACTOR_ID);
+    expect(listedAtt.created_at).toMatch(ISO_DATETIME_RE);
+  });
+
+  it('attachment.create_upload is idempotent via operation_id', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+    const req = readFixture(
+      'attachment-create-upload-happy.req.json',
+    ) as Record<string, unknown>;
+
+    const first = await app.fetch(
+      new Request('http://test/api/attachments', bearer(req)),
+    );
+    expect(first.status).toBe(201);
+    const firstJson = (await first.json()) as {
+      attachment: { id: string };
+      upload_url: string;
+    };
+
+    const second = await app.fetch(
+      new Request('http://test/api/attachments', bearer(req)),
+    );
+    expect(second.status).toBe(201);
+    const secondJson = (await second.json()) as {
+      attachment: { id: string };
+      upload_url: string;
+    };
+
+    // Idempotent replay returns the same attachment id and upload_url.
+    expect(secondJson.attachment.id).toBe(firstJson.attachment.id);
+    expect(secondJson.upload_url).toBe(firstJson.upload_url);
+  });
+
+  it('MCP attachment.create_upload and attachment.get return structured content', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+    const req = readFixture(
+      'attachment-create-upload-happy.req.json',
+    ) as Record<string, unknown>;
+
+    const createResp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 600,
+          method: 'tools/call',
+          params: { name: 'sprino.attachment.create_upload', arguments: req },
+        }),
+      ),
+    );
+    expect(createResp.status).toBe(200);
+    const createBody = (await createResp.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        structuredContent: {
+          attachment: Record<string, unknown>;
+          upload_url: string;
+        };
+      };
+    };
+    const sc = createBody.result.structuredContent;
+    expect(sc.attachment.status).toBe('pending');
+    expect(sc.attachment.task_id).toBe(FIXTURE_TASK_ID);
+    expect(sc.upload_url).toMatch(/^\/api\/attachments\/.+\/upload$/);
+    expect(createBody.result.content[0]?.text).toBe(JSON.stringify(sc));
+
+    const attId = sc.attachment.id as string;
+
+    const getResp = await app.fetch(
+      new Request(
+        'http://test/mcp',
+        bearer({
+          jsonrpc: '2.0',
+          id: 601,
+          method: 'tools/call',
+          params: {
+            name: 'sprino.attachment.get',
+            arguments: { attachment_id: attId },
+          },
+        }),
+      ),
+    );
+    expect(getResp.status).toBe(200);
+    const getBody = (await getResp.json()) as {
+      result: {
+        structuredContent: { attachment: Record<string, unknown> };
+      };
+    };
+    expect(getBody.result.structuredContent.attachment.id).toBe(attId);
+    expect(getBody.result.structuredContent.attachment.status).toBe('pending');
+  });
 });

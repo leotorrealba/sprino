@@ -113,7 +113,7 @@ describe('LocalStorageBackend (C2-P2)', () => {
 
   it('downloadUrl returns the Sprino download route for the attachment id', () => {
     const id = uuidv7();
-    expect(storage.downloadUrl(id)).toBe(`/api/attachments/${id}`);
+    expect(storage.downloadUrl(id)).toBe(`/api/attachments/${id}/download`);
   });
 
   it('exists returns false before any write', async () => {
@@ -177,6 +177,14 @@ describe('LocalStorageBackend (C2-P2)', () => {
     await expect(storage.remove('../escape')).rejects.toThrow(
       'Invalid attachment id',
     );
+  });
+
+  it('read returns the stored binary', async () => {
+    const id = uuidv7();
+    const data = Buffer.from('read-back test');
+    await storage.write(id, data);
+    const result = await storage.read(id);
+    expect(result).toEqual(data);
   });
 
   it('two distinct attachment ids do not collide in the same dir', async () => {

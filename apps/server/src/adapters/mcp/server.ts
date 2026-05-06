@@ -25,6 +25,10 @@ import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import type { AuthEnv } from '../../auth/middleware.ts';
 import {
+  AttachmentCreateUploadReqSchema,
+  AttachmentFinalizeReqSchema,
+  AttachmentGetReqSchema,
+  AttachmentListReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
@@ -36,6 +40,16 @@ import {
   ActorRevokeTokenReqSchema,
   ActorDeactivateReqSchema,
 } from '../../domain/index.ts';
+import {
+  AttachmentNotFoundError,
+  AttachmentNotReadyError,
+  AttachmentTaskNotFoundError,
+  createUpload,
+  finalize,
+  getAttachment,
+  listAttachments,
+} from '../../service/attachments.ts';
+import { storage } from '../../service/attachments/instance.ts';
 import {
   AgentHeartbeatForbiddenError,
   deactivateAgent,
@@ -259,6 +273,63 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.attachment.create_upload',
+    description:
+      'Reserve an upload slot for a file attachment (Tessera v0.1.4). Returns a pending attachment and an upload_url to PUT the binary bytes to before calling attachment.finalize. Idempotent via operation_id.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'filename', 'content_type', 'size_bytes'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        filename: { type: 'string', minLength: 1, maxLength: 255 },
+        content_type: { type: 'string', minLength: 1, maxLength: 127 },
+        size_bytes: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
+  {
+    name: 'sprino.attachment.finalize',
+    description:
+      'Confirm binary upload and transition attachment from pending to ready (Tessera v0.1.4). Call after PUT binary to upload_url. Idempotent via operation_id; domain-idempotent for already-ready attachments.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'attachment_id'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        attachment_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.attachment.get',
+    description:
+      'Fetch an attachment by id (Tessera v0.1.4). Returns any status (pending or ready). Does not expose upload_url.',
+    inputSchema: {
+      type: 'object',
+      required: ['attachment_id'],
+      additionalProperties: false,
+      properties: {
+        attachment_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.attachment.list',
+    description:
+      'List all ready attachments for a task (Tessera v0.1.4). Ordered by created_at ascending. Pending attachments are excluded.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      additionalProperties: false,
+      properties: {
+        task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -385,6 +456,26 @@ async function callTool(
       });
       return wrapToolResult(res);
     }
+    case 'sprino.attachment.create_upload': {
+      const req = AttachmentCreateUploadReqSchema.parse(args);
+      const res = await createUpload(db, storage, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.attachment.finalize': {
+      const req = AttachmentFinalizeReqSchema.parse(args);
+      const res = await finalize(db, storage, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.attachment.get': {
+      const req = AttachmentGetReqSchema.parse(args);
+      const res = await getAttachment(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.attachment.list': {
+      const req = AttachmentListReqSchema.parse(args);
+      const res = await listAttachments(db, { req });
+      return wrapToolResult(res);
+    }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
   }
@@ -491,6 +582,19 @@ function translateError(
       ...(err.toState ? { to_state: err.toState } : {}),
       ...(err.actorKind ? { actor_kind: err.actorKind } : {}),
     });
+  }
+  if (err instanceof AttachmentNotFoundError) {
+    return rpcError(id, -32004, 'attachment_not_found', {
+      attachment_id: err.attachmentId,
+    });
+  }
+  if (err instanceof AttachmentNotReadyError) {
+    return rpcError(id, -32009, 'binary_not_uploaded', {
+      attachment_id: err.attachmentId,
+    });
+  }
+  if (err instanceof AttachmentTaskNotFoundError) {
+    return rpcError(id, -32004, 'task_not_found', { task_id: err.taskId });
   }
   console.error('Unhandled MCP error:', err);
   return rpcError(id, -32603, 'Internal error');

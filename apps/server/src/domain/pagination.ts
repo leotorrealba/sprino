@@ -21,6 +21,7 @@ export const MAX_LIMITS = {
   events: 1000,
   tasks: 500,
   agents: 100,
+  attachments: 100,
 } as const;
 
 /**

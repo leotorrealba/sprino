@@ -28,6 +28,9 @@ export interface StorageBackend {
   /** True if binary data has been written and is non-empty for this attachment. */
   exists(attachmentId: string): Promise<boolean>;
 
+  /** Read stored binary. Throws if the slot was never written. */
+  read(attachmentId: string): Promise<Buffer>;
+
   /** Remove stored binary. Silently succeeds if the slot was never written. */
   remove(attachmentId: string): Promise<void>;
 }

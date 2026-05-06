@@ -35,3 +35,7 @@ process.env.SPRINO_ACTORS_JSON = JSON.stringify([
 // SSE ticket signing secret — must be ≥32 chars per stream-ticket.ts.
 process.env.SPRINO_STREAM_SECRET =
   'test-stream-secret-do-not-use-in-prod-32chars-min';
+
+// Attachment storage dir for the LocalStorageBackend singleton used by HTTP routes.
+// Set before any module import so instance.ts picks it up at load time.
+process.env.ATTACHMENT_STORAGE_DIR = '/tmp/sprino-test-attachments';
