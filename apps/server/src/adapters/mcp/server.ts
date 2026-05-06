@@ -29,6 +29,7 @@ import {
   AttachmentFinalizeReqSchema,
   AttachmentGetReqSchema,
   AttachmentListReqSchema,
+  ProjectCreateReqSchema,
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
@@ -57,6 +58,8 @@ import {
 } from '../../service/agent-lifecycle.ts';
 import {
   ProjectNotFoundError,
+  ProjectSlugConflictError,
+  createProject,
   getProject,
   listProjects,
 } from '../../service/projects.ts';
@@ -101,6 +104,27 @@ interface JsonRpcResponse {
 }
 
 const TOOL_DEFINITIONS = [
+  {
+    name: 'sprino.project.create',
+    description:
+      'Create a new project (Tessera v0.1.5). Idempotent via operation_id (UUIDv7). Returns the new project envelope. Fails with slug_conflict (409) if the slug is already taken.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'slug', 'display_name'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        slug: {
+          type: 'string',
+          pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$',
+          minLength: 1,
+          maxLength: 64,
+        },
+        display_name: { type: 'string', minLength: 1, maxLength: 200 },
+        repo_path: { type: ['string', 'null'], minLength: 1 },
+      },
+    },
+  },
   {
     name: 'sprino.project.list',
     description:
@@ -397,6 +421,11 @@ async function callTool(
   const actor: ActorEntry = c.get('actor');
 
   switch (name) {
+    case 'sprino.project.create': {
+      const req = ProjectCreateReqSchema.parse(args);
+      const res = await createProject(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
     case 'sprino.project.list': {
       const res = await listProjects(db);
       return wrapToolResult(res);
@@ -521,6 +550,9 @@ function translateError(
   }
   if (err instanceof RpcMethodError) {
     return rpcError(id, err.code, err.message);
+  }
+  if (err instanceof ProjectSlugConflictError) {
+    return rpcError(id, -32009, 'slug_conflict', { slug: err.slug });
   }
   if (err instanceof ProjectNotFoundError) {
     return rpcError(id, -32004, 'project_not_found', { ref: err.ref });

@@ -8,15 +8,23 @@
  */
 
 import { asc, eq } from 'drizzle-orm';
+import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { projects } from '../db/schema.ts';
 import type { ProjectRow } from '../db/schema.ts';
 import type {
   Project,
+  ProjectCreateReq,
+  ProjectCreateRes,
   ProjectGetReq,
   ProjectGetRes,
   ProjectListRes,
 } from '../domain/index.ts';
+import {
+  checkIdempotency,
+  hashRequest,
+  recordOperation,
+} from './idempotency.ts';
 
 type ProjectLookupRef = {
   project_id?: string | null;
@@ -28,6 +36,13 @@ export class ProjectNotFoundError extends Error {
   constructor(public readonly ref: ProjectLookupRef) {
     super(`project not found for ${JSON.stringify(ref)}`);
     this.name = 'ProjectNotFoundError';
+  }
+}
+
+export class ProjectSlugConflictError extends Error {
+  constructor(public readonly slug: string) {
+    super(`project slug '${slug}' is already taken`);
+    this.name = 'ProjectSlugConflictError';
   }
 }
 
@@ -145,4 +160,65 @@ export async function getProject(
   });
 
   return { project: rowToProject(row) };
+}
+
+/**
+ * project.create — create a new project. Idempotent via operation_id.
+ * Throws ProjectSlugConflictError if the slug is already taken.
+ */
+export async function createProject(
+  db: Db,
+  { req, actorId }: { req: ProjectCreateReq; actorId: string },
+): Promise<ProjectCreateRes> {
+  const requestHash = hashRequest(req);
+  const cached = await checkIdempotency(db, req.operation_id, requestHash);
+  if (cached !== null) return cached as ProjectCreateRes;
+
+  // Pre-check slug uniqueness outside the transaction so the error is clean.
+  const existing = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.slug, req.slug))
+    .limit(1);
+  if (existing[0]) throw new ProjectSlugConflictError(req.slug);
+
+  const projectId = uuidv7();
+
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.insert(projects).values({
+        id: projectId,
+        slug: req.slug,
+        displayName: req.display_name,
+        repoPath: req.repo_path ?? null,
+      });
+      const [inserted] = await tx
+        .select()
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+      const res: ProjectCreateRes = { project: rowToProject(inserted!) };
+      await recordOperation(tx, {
+        operationId: req.operation_id,
+        actorId,
+        requestHash,
+        responseBody: res,
+      });
+      return res;
+    });
+  } catch (err) {
+    // Idempotency re-check covers concurrent creates with the same operation_id.
+    const raced = await checkIdempotency(db, req.operation_id, requestHash);
+    if (raced !== null) return raced as ProjectCreateRes;
+    // Unique-constraint violation from a concurrent create with a different
+    // operation_id hitting the same slug → surface as a clean 409.
+    if (
+      err instanceof Error &&
+      err.message.includes('unique') &&
+      err.message.toLowerCase().includes('slug')
+    ) {
+      throw new ProjectSlugConflictError(req.slug);
+    }
+    throw err;
+  }
 }

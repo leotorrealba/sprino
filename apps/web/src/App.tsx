@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
 import { ActivityFeed } from './components/ActivityFeed';
+import { Attachments } from './components/Attachments';
 import { Members } from './components/Members';
 
 type LoadState = 'idle' | 'loading' | 'error';
@@ -47,11 +48,16 @@ export function App() {
     () => localStorage.getItem(PROJECT_STORAGE_KEY) ?? '',
   );
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [view, setView] = useState<View>('tasks');
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProjectSlug, setNewProjectSlug] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
   const activeProject = projects.find((p) => p.id === selectedProjectId);
 
   const fetchAuth = useCallback(
@@ -152,6 +158,38 @@ export function App() {
     }
   };
 
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const slug = newProjectSlug.trim();
+    const display_name = newProjectName.trim();
+    if (!slug || !display_name || projectBusy) return;
+    setProjectBusy(true);
+    try {
+      const r = await fetchAuth('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({ operation_id: uuidv7(), slug, display_name }),
+      });
+      if (!r.ok) {
+        const body = (await r.json()) as { error?: string; slug?: string };
+        if (body.error === 'slug_conflict') {
+          throw new Error(`slug '${body.slug}' is already taken`);
+        }
+        throw new Error(`create project failed: ${r.status}`);
+      }
+      const j = (await r.json()) as { project: Project };
+      setNewProjectSlug('');
+      setNewProjectName('');
+      setShowNewProject(false);
+      await refreshProjects();
+      setSelectedProjectId(j.project.id);
+      localStorage.setItem(PROJECT_STORAGE_KEY, j.project.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProjectBusy(false);
+    }
+  };
+
   const connect = (e: React.FormEvent) => {
     e.preventDefault();
     const nextToken = tokenDraft.trim();
@@ -188,7 +226,7 @@ export function App() {
           <div className="mx-auto max-w-4xl px-6 py-4">
             <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
             <p className="text-xs text-slate-500">
-              Tessera v0.1.2 reference impl
+              Tessera v0.1.4 reference impl
             </p>
           </div>
         </header>
@@ -223,7 +261,7 @@ export function App() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Sprino</h1>
             <p className="text-xs text-slate-500">
-              Tessera v0.1.2 reference impl
+              Tessera v0.1.4 reference impl
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -269,6 +307,12 @@ export function App() {
               )}
             </select>
             <button
+              onClick={() => setShowNewProject((v) => !v)}
+              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            >
+              + project
+            </button>
+            <button
               onClick={() => {
                 localStorage.removeItem(TOKEN_STORAGE_KEY);
                 localStorage.removeItem(PROJECT_STORAGE_KEY);
@@ -284,6 +328,44 @@ export function App() {
             </button>
           </div>
         </div>
+        {showNewProject && (
+          <div className="border-t border-slate-100 bg-slate-50 px-6 py-3">
+            <form
+              onSubmit={(e) => void handleCreateProject(e)}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <input
+                value={newProjectSlug}
+                onChange={(e) => setNewProjectSlug(e.target.value)}
+                placeholder="slug (e.g. my-project)"
+                pattern="^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                required
+                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
+              />
+              <input
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                placeholder="display name"
+                required
+                className="h-8 min-w-40 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={projectBusy || !newProjectSlug.trim() || !newProjectName.trim()}
+                className="h-8 rounded-md bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-40"
+              >
+                {projectBusy ? 'creating…' : 'create'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowNewProject(false); setNewProjectSlug(''); setNewProjectName(''); }}
+                className="text-xs text-slate-400 hover:text-slate-700"
+              >
+                cancel
+              </button>
+            </form>
+          </div>
+        )}
       </header>
 
       <main className="mx-auto max-w-4xl px-6 py-8">
@@ -335,41 +417,65 @@ export function App() {
           <p className="text-sm text-slate-400">no tasks yet</p>
         ) : (
           <ul className="space-y-2">
-            {tasks.map((t) => (
-              <li
-                key={t.id}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{t.title}</p>
-                    {t.description && (
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-500">
-                        {t.description}
+            {tasks.map((t) => {
+              const expanded = selectedTaskId === t.id;
+              return (
+                <li
+                  key={t.id}
+                  className={`rounded-lg border bg-white p-4 shadow-sm transition-colors ${
+                    expanded ? 'border-slate-400' : 'border-slate-200'
+                  }`}
+                >
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-start justify-between gap-4"
+                    onClick={() =>
+                      setSelectedTaskId((prev) => (prev === t.id ? null : t.id))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedTaskId((prev) => (prev === t.id ? null : t.id));
+                      }
+                    }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{t.title}</p>
+                      {t.description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-slate-500">
+                          {t.description}
+                        </p>
+                      )}
+                      <p className="mt-1 font-mono text-[10px] text-slate-400">
+                        {t.id} · v{t.version}
                       </p>
-                    )}
-                    <p className="mt-1 font-mono text-[10px] text-slate-400">
-                      {t.id} · v{t.version}
-                    </p>
+                    </div>
+                    <div
+                      className="flex shrink-0 gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {STATUSES.map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => void changeStatus(t, s)}
+                          className={`rounded px-2 py-1 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset ${
+                            t.status === s
+                              ? STATUS_PILL[s]
+                              : 'bg-white text-slate-400 ring-slate-200 hover:text-slate-700'
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
-                    {STATUSES.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => void changeStatus(t, s)}
-                        className={`rounded px-2 py-1 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset ${
-                          t.status === s
-                            ? STATUS_PILL[s]
-                            : 'bg-white text-slate-400 ring-slate-200 hover:text-slate-700'
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </li>
-            ))}
+                  {expanded && (
+                    <Attachments token={token} taskId={t.id} />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 
