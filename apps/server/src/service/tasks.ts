@@ -33,7 +33,7 @@
 import { and, desc, eq, asc } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { events, tasks } from '../db/schema.ts';
+import { events, tasks, workflowColumns } from '../db/schema.ts';
 import type { TaskRow, EventRow } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
@@ -285,6 +285,20 @@ export async function createTask(
   // byte-order property. Atomicity is guaranteed by the single transaction.
   try {
     return await db.transaction(async (tx) => {
+      // Look up the default workflow column for this project.
+      // Falls back to null gracefully if no columns are seeded yet.
+      const defaultColRows = await tx
+        .select({ id: workflowColumns.id })
+        .from(workflowColumns)
+        .where(
+          and(
+            eq(workflowColumns.projectId, project.id),
+            eq(workflowColumns.isDefault, true),
+          ),
+        )
+        .limit(1);
+      const defaultColumnId = defaultColRows[0]?.id ?? null;
+
       const [taskRow] = await tx
         .insert(tasks)
         .values({
@@ -298,6 +312,7 @@ export async function createTask(
           version: 1,
           createdAt: now,
           updatedAt: now,
+          workflowColumnId: defaultColumnId,
         })
         .returning();
 
