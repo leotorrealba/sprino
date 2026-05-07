@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
+import type { Actor, Project, Task, TaskStatus } from '@sprino/protocol-types';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
+import { BoardFilters, type BoardFilterState } from './components/BoardFilters';
 import { Members } from './components/Members';
 import { TaskWorkflowBoard } from './components/TaskWorkflowBoard';
 
@@ -51,6 +52,8 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [view, setView] = useState<View>('tasks');
+  const [filters, setFilters] = useState<BoardFilterState>({ statuses: [], assigneeId: null });
+  const [members, setMembers] = useState<Actor[]>([]);
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -109,18 +112,22 @@ export function App() {
     setLoad('loading');
     setError(null);
     try {
-      const r = await fetchAuth(
-        `/api/tasks?project_id=${encodeURIComponent(selectedProjectId)}`,
-      );
-      if (!r.ok) throw new Error(`list failed: ${r.status}`);
+      const params = new URLSearchParams({ project_id: selectedProjectId });
+      if (filters.statuses.length > 0) {
+        for (const s of filters.statuses) params.append('status', s);
+      }
+      if (filters.assigneeId) params.set('assignee_id', filters.assigneeId);
+
+      const r = await fetchAuth(`/api/tasks?${params.toString()}`);
+      if (!r.ok) throw new Error(`tasks failed: ${r.status}`);
       const j = (await r.json()) as { tasks: Task[] };
       setTasks(j.tasks);
       setLoad('idle');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
       setLoad('error');
+      setError(e instanceof Error ? e.message : String(e));
     }
-  }, [selectedProjectId, fetchAuth, token]);
+  }, [fetchAuth, token, selectedProjectId, filters]);
 
   useEffect(() => {
     void refreshProjects();
@@ -132,6 +139,14 @@ export function App() {
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!token || !selectedProjectId) { setMembers([]); return; }
+    fetchAuth(`/api/members?project_id=${selectedProjectId}`)
+      .then((r) => r.ok ? r.json() : Promise.resolve({ actors: [] }))
+      .then((j: { actors: Actor[] }) => setMembers(j.actors))
+      .catch(() => setMembers([]));
+  }, [fetchAuth, token, selectedProjectId]);
 
   const createTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -384,12 +399,20 @@ export function App() {
           <Members token={token} />
         ) : view === 'board' ? (
           selectedProjectId && (
-            <TaskWorkflowBoard
-              projectId={selectedProjectId}
-              token={token}
-              tasks={tasks}
-              onTaskUpdated={refresh}
-            />
+            <>
+              <BoardFilters
+                members={members}
+                filters={filters}
+                onChange={(f) => { setFilters(f); }}
+              />
+              <TaskWorkflowBoard
+                projectId={selectedProjectId}
+                token={token}
+                tasks={tasks}
+                filters={filters}
+                onTaskUpdated={refresh}
+              />
+            </>
           )
         ) : (
           <>

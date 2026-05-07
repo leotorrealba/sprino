@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Task } from '@sprino/protocol-types';
+import type { BoardFilterState } from './BoardFilters';
 
 interface WorkflowColumn {
   id: string;
@@ -18,6 +19,7 @@ interface Props {
   projectId: string;
   token: string;
   tasks: Task[];
+  filters: BoardFilterState;
   onTaskUpdated: () => void;
 }
 
@@ -37,7 +39,7 @@ function uuidv7(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function TaskWorkflowBoard({ projectId, token, tasks, onTaskUpdated }: Props) {
+export function TaskWorkflowBoard({ projectId, token, tasks, filters: _filters, onTaskUpdated }: Props) {
   const [columns, setColumns] = useState<WorkflowColumn[]>([]);
   const [transitions, setTransitions] = useState<WorkflowTransition[]>([]);
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
