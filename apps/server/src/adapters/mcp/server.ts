@@ -33,7 +33,9 @@ import {
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
+  TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
+  TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
@@ -65,9 +67,14 @@ import {
 } from '../../service/projects.ts';
 import {
   TaskNotFoundError,
+  TaskNotInColumnError,
   VersionMismatchError,
+  WorkflowColumnNotFoundError,
+  WorkflowTransitionForbiddenError,
   createTask,
   getTask,
+  reorderTask,
+  transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
 import {
@@ -354,6 +361,39 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.task.transition_workflow',
+    description:
+      "Move a task to a different workflow column. Validates the transition against the project's allowed-transition graph. Idempotent via operation_id; concurrency-safe via if_match.",
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'to_column_id', 'if_match'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        to_column_id: { type: 'string', format: 'uuid' },
+        if_match: { type: 'integer', minimum: 1 },
+        notes: { type: 'string', maxLength: 2048 },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.reorder',
+    description:
+      "Reorder a task within its current workflow column. after_task_id=null moves the task to the top of the column. Idempotent via operation_id. column_id must match the task's current workflow_column_id.",
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'column_id', 'after_task_id'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        column_id: { type: 'string', format: 'uuid' },
+        after_task_id: { type: ['string', 'null'], format: 'uuid' },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -448,6 +488,16 @@ async function callTool(
     case 'sprino.task.update_status': {
       const req = TaskUpdateStatusReqSchema.parse(args);
       const res = await updateTaskStatus(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.transition_workflow': {
+      const req = TaskTransitionWorkflowReqSchema.parse(args);
+      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.reorder': {
+      const req = TaskReorderReqSchema.parse(args);
+      const res = await reorderTask(db, { req, actorId: actor.id });
       return wrapToolResult(res);
     }
     case 'sprino.actor.register': {
@@ -560,9 +610,26 @@ function translateError(
   if (err instanceof TaskNotFoundError) {
     return rpcError(id, -32004, 'task_not_found', { task_id: err.taskId });
   }
+  if (err instanceof TaskNotInColumnError) {
+    return rpcError(id, -32010, 'task_not_in_column', {
+      task_id: err.taskId,
+      column_id: err.columnId,
+    });
+  }
   if (err instanceof VersionMismatchError) {
     return rpcError(id, -32009, 'version_mismatch', {
       task: err.currentTask,
+    });
+  }
+  if (err instanceof WorkflowTransitionForbiddenError) {
+    return rpcError(id, -32009, 'workflow_transition_forbidden', {
+      from_column_id: err.fromColumnId,
+      to_column_id: err.toColumnId,
+    });
+  }
+  if (err instanceof WorkflowColumnNotFoundError) {
+    return rpcError(id, -32004, 'workflow_column_not_found', {
+      column_id: err.columnId,
     });
   }
   if (err instanceof IdempotencyConflictError) {

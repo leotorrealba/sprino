@@ -10,7 +10,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { projects } from '../db/schema.ts';
+import { projects, workflowColumns, workflowTransitions } from '../db/schema.ts';
 import type { ProjectRow } from '../db/schema.ts';
 import type {
   Project,
@@ -31,6 +31,31 @@ type ProjectLookupRef = {
   slug?: string | null;
   repo_path?: string | null;
 };
+
+export async function seedDefaultWorkflowColumns(
+  db: Pick<Db, 'insert'>,
+  projectId: string,
+): Promise<void> {
+  const backlogId = uuidv7();
+  const inProgressId = uuidv7();
+  const inReviewId = uuidv7();
+  const doneId = uuidv7();
+  const now = new Date();
+
+  await db.insert(workflowColumns).values([
+    { id: backlogId, projectId, name: 'Backlog', position: 0, mapsToStatus: 'todo', isDefault: true, createdAt: now },
+    { id: inProgressId, projectId, name: 'In Progress', position: 1, mapsToStatus: 'doing', isDefault: false, createdAt: now },
+    { id: inReviewId, projectId, name: 'In Review', position: 2, mapsToStatus: 'doing', isDefault: false, createdAt: now },
+    { id: doneId, projectId, name: 'Done', position: 3, mapsToStatus: 'done', isDefault: false, createdAt: now },
+  ]);
+
+  await db.insert(workflowTransitions).values([
+    { fromColumnId: backlogId, toColumnId: inProgressId },
+    { fromColumnId: inProgressId, toColumnId: inReviewId },
+    { fromColumnId: inReviewId, toColumnId: doneId },
+    { fromColumnId: doneId, toColumnId: inProgressId },
+  ]);
+}
 
 export class ProjectNotFoundError extends Error {
   constructor(public readonly ref: ProjectLookupRef) {
@@ -192,6 +217,10 @@ export async function createProject(
         displayName: req.display_name,
         repoPath: req.repo_path ?? null,
       });
+
+      // Seed the four default workflow columns for this new project.
+      await seedDefaultWorkflowColumns(tx, projectId);
+
       const [inserted] = await tx
         .select()
         .from(projects)

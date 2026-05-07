@@ -66,6 +66,8 @@ export const TaskSchema = z.object({
   version: z.number().int().min(1),
   created_at: isoDateTime,
   updated_at: isoDateTime,
+  workflow_column_id: uuid.nullable(),
+  rank: z.number().int().min(0),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -75,6 +77,7 @@ export const EventKindSchema = z.enum([
   'assigned',
   'context_updated',
   'commented',
+  'workflow_transitioned',
 ]);
 export type EventKind = z.infer<typeof EventKindSchema>;
 
@@ -107,6 +110,61 @@ export const EventWithActorSchema = EventSchema.extend({
   }),
 });
 export type EventWithActor = z.infer<typeof EventWithActorSchema>;
+
+// ── D1: Workflow State Machine ────────────────────────────────────────────
+
+export const WorkflowColumnSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(80),
+  position: z.number().int().min(0),
+  maps_to_status: TaskStatusSchema,
+  is_default: z.boolean(),
+  created_at: isoDateTime,
+});
+export type WorkflowColumn = z.infer<typeof WorkflowColumnSchema>;
+
+export const WorkflowTransitionSchema = z.object({
+  from_column_id: uuid,
+  to_column_id: uuid,
+});
+export type WorkflowTransition = z.infer<typeof WorkflowTransitionSchema>;
+
+export const WorkflowColumnsListResSchema = z.object({
+  columns: z.array(WorkflowColumnSchema),
+  transitions: z.array(WorkflowTransitionSchema),
+});
+export type WorkflowColumnsListRes = z.infer<typeof WorkflowColumnsListResSchema>;
+
+export const TaskTransitionWorkflowReqSchema = z.object({
+  operation_id: uuid,
+  task_id: uuid,
+  to_column_id: uuid,
+  if_match: z.number().int().min(1),
+  notes: z.string().max(2048).optional(),
+});
+export type TaskTransitionWorkflowReq = z.infer<typeof TaskTransitionWorkflowReqSchema>;
+
+export const TaskTransitionWorkflowResSchema = z.object({
+  task: TaskSchema,
+  event: EventSchema,
+});
+export type TaskTransitionWorkflowRes = z.infer<typeof TaskTransitionWorkflowResSchema>;
+
+// ── D2: Task Reorder ──────────────────────────────────────────────────────
+
+export const TaskReorderReqSchema = z.object({
+  operation_id: uuid,
+  task_id: uuid,
+  column_id: uuid,
+  after_task_id: uuid.nullable(),
+});
+export type TaskReorderReq = z.infer<typeof TaskReorderReqSchema>;
+
+export const TaskReorderResSchema = z.object({
+  tasks: z.array(TaskSchema),
+});
+export type TaskReorderRes = z.infer<typeof TaskReorderResSchema>;
 
 export const RepoRefSchema = z.object({
   kind: z.enum(['commit', 'branch', 'pr', 'file', 'issue']),
@@ -183,6 +241,8 @@ export type EventListReq = z.infer<typeof EventListReqSchema>;
 export const TaskListReqSchema = z
   .object({
     project_id: uuid,
+    status: z.array(TaskStatusSchema).optional(),
+    assignee_id: uuid.optional(),
   })
   .merge(paginationSchema(MAX_LIMITS.tasks));
 export type TaskListReq = z.infer<typeof TaskListReqSchema>;

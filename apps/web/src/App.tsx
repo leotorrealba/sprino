@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Project, Task, TaskStatus } from '@sprino/protocol-types';
+import type { Actor, Project, Task, TaskStatus } from '@sprino/protocol-types';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
+import { BoardFilters, type BoardFilterState } from './components/BoardFilters';
 import { Members } from './components/Members';
+import { TaskWorkflowBoard } from './components/TaskWorkflowBoard';
+import { uuidv7 } from './lib/uuid';
 
 type LoadState = 'idle' | 'loading' | 'error';
-type View = 'tasks' | 'members';
+type View = 'tasks' | 'members' | 'board';
 
 const STATUSES: TaskStatus[] = ['todo', 'doing', 'done', 'blocked'];
 
@@ -16,24 +19,6 @@ const STATUS_PILL: Record<TaskStatus, string> = {
   blocked: 'bg-rose-100 text-rose-800 ring-rose-300',
 };
 
-function uuidv7(): string {
-  // Minimal UUIDv7 generator — sufficient for browser-side operation_id.
-  // Bytes 0..5: 48-bit Unix ms timestamp. Byte 6 high nibble: version=7.
-  // Byte 8 high two bits: variant=10. Remaining: random.
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  const ms = BigInt(Date.now());
-  bytes[0] = Number((ms >> 40n) & 0xffn);
-  bytes[1] = Number((ms >> 32n) & 0xffn);
-  bytes[2] = Number((ms >> 24n) & 0xffn);
-  bytes[3] = Number((ms >> 16n) & 0xffn);
-  bytes[4] = Number((ms >> 8n) & 0xffn);
-  bytes[5] = Number(ms & 0xffn);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 const TOKEN_STORAGE_KEY = 'sprino_token';
 const PROJECT_STORAGE_KEY = 'sprino_project_id';
@@ -50,6 +35,8 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [view, setView] = useState<View>('tasks');
+  const [filters, setFilters] = useState<BoardFilterState>({ statuses: [], assigneeId: null });
+  const [members, setMembers] = useState<Actor[]>([]);
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -108,18 +95,22 @@ export function App() {
     setLoad('loading');
     setError(null);
     try {
-      const r = await fetchAuth(
-        `/api/tasks?project_id=${encodeURIComponent(selectedProjectId)}`,
-      );
-      if (!r.ok) throw new Error(`list failed: ${r.status}`);
+      const params = new URLSearchParams({ project_id: selectedProjectId });
+      if (filters.statuses.length > 0) {
+        for (const s of filters.statuses) params.append('status', s);
+      }
+      if (filters.assigneeId) params.set('assignee_id', filters.assigneeId);
+
+      const r = await fetchAuth(`/api/tasks?${params.toString()}`);
+      if (!r.ok) throw new Error(`tasks failed: ${r.status}`);
       const j = (await r.json()) as { tasks: Task[] };
       setTasks(j.tasks);
       setLoad('idle');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
       setLoad('error');
+      setError(e instanceof Error ? e.message : String(e));
     }
-  }, [selectedProjectId, fetchAuth, token]);
+  }, [fetchAuth, token, selectedProjectId, filters]);
 
   useEffect(() => {
     void refreshProjects();
@@ -131,6 +122,14 @@ export function App() {
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!token || !selectedProjectId) { setMembers([]); return; }
+    fetchAuth(`/api/members?project_id=${selectedProjectId}`)
+      .then((r) => r.ok ? r.json() : Promise.resolve({ actors: [] }))
+      .then((j: { actors: Actor[] }) => setMembers(j.actors))
+      .catch(() => setMembers([]));
+  }, [fetchAuth, token, selectedProjectId]);
 
   const createTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,6 +285,16 @@ export function App() {
               >
                 Members
               </button>
+              <button
+                onClick={() => setView('board')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'board'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Board
+              </button>
             </nav>
             <select
               value={selectedProjectId}
@@ -371,6 +380,23 @@ export function App() {
       <main className="mx-auto max-w-4xl px-6 py-8">
         {view === 'members' ? (
           <Members token={token} />
+        ) : view === 'board' ? (
+          selectedProjectId && (
+            <>
+              <BoardFilters
+                members={members}
+                filters={filters}
+                onChange={(f) => { setFilters(f); }}
+              />
+              <TaskWorkflowBoard
+                projectId={selectedProjectId}
+                token={token}
+                tasks={tasks}
+                filters={filters}
+                onTaskUpdated={refresh}
+              />
+            </>
+          )
         ) : (
           <>
             <div className="mb-4 flex flex-wrap items-end justify-between gap-2">

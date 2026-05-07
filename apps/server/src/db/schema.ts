@@ -24,6 +24,8 @@ import {
   jsonb,
   index,
   pgEnum,
+  boolean,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 
 // ────────────────────────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ export const eventKindEnum = pgEnum('event_kind', [
   'assigned',
   'context_updated',
   'commented',
+  'workflow_transitioned',
 ]);
 export const attachmentStatusEnum = pgEnum('attachment_status', [
   'pending',
@@ -167,10 +170,15 @@ export const tasks = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    workflowColumnId: uuid('workflow_column_id').references(
+      () => workflowColumns.id,
+    ),
+    rank: integer('rank').notNull().default(0),
   },
   (t) => ({
     projectIdx: index('tasks_project_idx').on(t.projectId),
     statusIdx: index('tasks_status_idx').on(t.projectId, t.status),
+    rankColumnIdx: index('tasks_rank_column_idx').on(t.workflowColumnId, t.rank),
   }),
 );
 
@@ -270,6 +278,41 @@ export const attachments = pgTable(
   }),
 );
 
+export const workflowColumns = pgTable(
+  'workflow_columns',
+  {
+    id: uuid('id').primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    position: integer('position').notNull(),
+    mapsToStatus: taskStatusEnum('maps_to_status').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdx: index('workflow_columns_project_idx').on(t.projectId),
+  }),
+);
+
+export const workflowTransitions = pgTable(
+  'workflow_transitions',
+  {
+    fromColumnId: uuid('from_column_id')
+      .notNull()
+      .references(() => workflowColumns.id, { onDelete: 'cascade' }),
+    toColumnId: uuid('to_column_id')
+      .notNull()
+      .references(() => workflowColumns.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.fromColumnId, t.toColumnId] }),
+  }),
+);
+
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
@@ -285,3 +328,7 @@ export type OperationRow = typeof operations.$inferSelect;
 export type NewOperationRow = typeof operations.$inferInsert;
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type NewAttachmentRow = typeof attachments.$inferInsert;
+export type WorkflowColumnRow = typeof workflowColumns.$inferSelect;
+export type NewWorkflowColumnRow = typeof workflowColumns.$inferInsert;
+export type WorkflowTransitionRow = typeof workflowTransitions.$inferSelect;
+export type NewWorkflowTransitionRow = typeof workflowTransitions.$inferInsert;

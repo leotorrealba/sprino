@@ -27,6 +27,7 @@ import { Hono } from 'hono';
 import { afterAll, beforeEach } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 
+import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
 import { tokenAuth } from '../src/auth/middleware.ts';
 import type { AuthEnv } from '../src/auth/middleware.ts';
 import { closeDb, db } from '../src/db/client.ts';
@@ -93,6 +94,7 @@ export async function resetDb(): Promise<void> {
     displayName: 'Sprino',
     repoPath: null,
   });
+  await seedDefaultWorkflowColumns(db, FIXTURE_PROJECT_ID);
 }
 
 export async function seedDbActor(args: {

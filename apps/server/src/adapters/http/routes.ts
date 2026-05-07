@@ -37,7 +37,9 @@ import {
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskListReqSchema,
+  TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
+  TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
@@ -87,12 +89,18 @@ import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   TaskNotFoundError,
+  TaskNotInColumnError,
   VersionMismatchError,
+  WorkflowColumnNotFoundError,
+  WorkflowTransitionForbiddenError,
   createTask,
   getTask,
   listRelatedTasks,
   listTaskEvents,
   listTasks,
+  listWorkflowColumns,
+  reorderTask,
+  transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
 import {
@@ -154,12 +162,26 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  api.get('/projects/:id/workflow-columns', async (c) => {
+    try {
+      const res = await listWorkflowColumns(c.get('db'), {
+        projectId: c.req.param('id'),
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   // Sprino-specific list extension — see service/tasks.ts.listTasks.
   // Not exposed via /mcp to keep the canonical protocol minimal.
   api.get('/tasks', async (c) => {
     try {
+      const statusParam = c.req.queries('status') ?? [];
       const req = TaskListReqSchema.parse({
         project_id: c.req.query('project_id'),
+        status: statusParam.length > 0 ? statusParam : undefined,
+        assignee_id: c.req.query('assignee_id') || undefined,
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
@@ -204,6 +226,39 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         req,
         actorId: actor.id,
       });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/tasks/:id/transition', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskTransitionWorkflowReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await transitionTaskWorkflow(c.get('db'), {
+        req,
+        actorId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/tasks/:id/reorder', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskReorderReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await reorderTask(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -760,6 +815,12 @@ function errorResponse(c: any, err: unknown): Response {
   if (err instanceof TaskNotFoundError) {
     return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);
   }
+  if (err instanceof TaskNotInColumnError) {
+    return c.json(
+      { error: 'task_not_in_column', task_id: err.taskId, column_id: err.columnId },
+      422,
+    );
+  }
   if (err instanceof VersionMismatchError) {
     return c.json(
       {
@@ -769,6 +830,22 @@ function errorResponse(c: any, err: unknown): Response {
         task: err.currentTask,
       },
       409,
+    );
+  }
+  if (err instanceof WorkflowTransitionForbiddenError) {
+    return c.json(
+      {
+        error: 'workflow_transition_forbidden',
+        from_column_id: err.fromColumnId,
+        to_column_id: err.toColumnId,
+      },
+      422,
+    );
+  }
+  if (err instanceof WorkflowColumnNotFoundError) {
+    return c.json(
+      { error: 'workflow_column_not_found', column_id: err.columnId },
+      404,
     );
   }
   if (err instanceof IdempotencyConflictError) {
