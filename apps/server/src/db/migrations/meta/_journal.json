@@ -57,6 +57,13 @@
       "when": 1777795200000,
       "tag": "0007_task_workflow_state",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777881600000,
+      "tag": "0008_task_rank",
+      "breakpoints": true
     }
   ]
 }

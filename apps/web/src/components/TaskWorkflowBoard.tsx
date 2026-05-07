@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Task } from '@sprino/protocol-types';
 import type { BoardFilterState } from './BoardFilters';
+import { uuidv7 } from '../lib/uuid';
 
 interface WorkflowColumn {
   id: string;
@@ -23,22 +24,6 @@ interface Props {
   onTaskUpdated: () => void;
 }
 
-function uuidv7(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  const ms = BigInt(Date.now());
-  bytes[0] = Number((ms >> 40n) & 0xffn);
-  bytes[1] = Number((ms >> 32n) & 0xffn);
-  bytes[2] = Number((ms >> 24n) & 0xffn);
-  bytes[3] = Number((ms >> 16n) & 0xffn);
-  bytes[4] = Number((ms >> 8n) & 0xffn);
-  bytes[5] = Number(ms & 0xffn);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 export function TaskWorkflowBoard({ projectId, token, tasks, filters: _filters, onTaskUpdated }: Props) {
   const [columns, setColumns] = useState<WorkflowColumn[]>([]);
   const [transitions, setTransitions] = useState<WorkflowTransition[]>([]);
@@ -50,7 +35,10 @@ export function TaskWorkflowBoard({ projectId, token, tasks, filters: _filters, 
   useEffect(() => {
     if (!projectId || !token) return;
     fetch(`/api/projects/${projectId}/workflow-columns`, { headers: authHeader })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`workflow-columns failed: ${r.status}`);
+        return r.json();
+      })
       .then((data: { columns: WorkflowColumn[]; transitions: WorkflowTransition[] }) => {
         setColumns(data.columns.slice().sort((a, b) => a.position - b.position));
         setTransitions(data.transitions);
@@ -114,7 +102,9 @@ export function TaskWorkflowBoard({ projectId, token, tasks, filters: _filters, 
         </div>
       )}
       {columns.map((col) => {
-        const colTasks = tasks.filter((t) => t.workflow_column_id === col.id);
+        const colTasks = tasks.filter(
+          (t) => t.workflow_column_id === col.id || (t.workflow_column_id === null && col.is_default),
+        );
         return (
           <div key={col.id} className="flex-shrink-0 w-64 bg-slate-50 rounded-lg p-3">
             <h3 className="font-semibold text-slate-700 text-sm mb-3">

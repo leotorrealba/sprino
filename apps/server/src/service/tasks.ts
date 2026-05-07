@@ -585,109 +585,109 @@ export async function transitionTaskWorkflow(
     return await db.transaction(async (tx) => {
       // Lock task row to prevent concurrent version increments.
       const taskRows = await tx
-      .select()
-      .from(tasks)
-      .where(eq(tasks.id, args.req.task_id))
-      .for('update');
-    const current = taskRows[0];
-    if (!current) throw new TaskNotFoundError(args.req.task_id);
-    if (current.version !== args.req.if_match) {
-      throw new VersionMismatchError(rowToTask(current));
-    }
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, args.req.task_id))
+        .for('update');
+      const current = taskRows[0];
+      if (!current) throw new TaskNotFoundError(args.req.task_id);
+      if (current.version !== args.req.if_match) {
+        throw new VersionMismatchError(rowToTask(current));
+      }
 
-    // Verify target column exists in the same project.
-    const colRows = await tx
-      .select()
-      .from(workflowColumns)
-      .where(
-        and(
-          eq(workflowColumns.id, args.req.to_column_id),
-          eq(workflowColumns.projectId, current.projectId),
-        ),
-      )
-      .limit(1);
-    const targetCol = colRows[0];
-    if (!targetCol) {
-      throw new WorkflowColumnNotFoundError(args.req.to_column_id);
-    }
-
-    const maxRankRow = await tx
-      .select({ maxRank: sql<number>`COALESCE(MAX(rank), 0)` })
-      .from(tasks)
-      .where(eq(tasks.workflowColumnId, args.req.to_column_id));
-    const transitionRank = (maxRankRow[0]?.maxRank ?? 0) + 1;
-
-    // Transition guard. A null current column means this is a pre-D1 task
-    // receiving its first column assignment — any target is allowed.
-    if (current.workflowColumnId !== null) {
-      const allowed = await tx
-        .select({ fromColumnId: workflowTransitions.fromColumnId })
-        .from(workflowTransitions)
+      // Verify target column exists in the same project.
+      const colRows = await tx
+        .select()
+        .from(workflowColumns)
         .where(
           and(
-            eq(workflowTransitions.fromColumnId, current.workflowColumnId),
-            eq(workflowTransitions.toColumnId, args.req.to_column_id),
+            eq(workflowColumns.id, args.req.to_column_id),
+            eq(workflowColumns.projectId, current.projectId),
           ),
         )
         .limit(1);
-      if (!allowed[0]) {
-        throw new WorkflowTransitionForbiddenError(
-          current.workflowColumnId,
-          args.req.to_column_id,
-        );
+      const targetCol = colRows[0];
+      if (!targetCol) {
+        throw new WorkflowColumnNotFoundError(args.req.to_column_id);
       }
-    }
 
-    const [eventRow] = await tx
-      .insert(events)
-      .values({
-        id: eventId,
-        taskId: args.req.task_id,
-        actorId: args.actorId,
-        kind: 'workflow_transitioned',
-        payload: {
-          from_column_id: current.workflowColumnId,
-          to_column_id: args.req.to_column_id,
-          ...(args.req.notes !== undefined ? { notes: args.req.notes } : {}),
-        },
+      const maxRankRow = await tx
+        .select({ maxRank: sql<number>`COALESCE(MAX(rank), 0)` })
+        .from(tasks)
+        .where(eq(tasks.workflowColumnId, args.req.to_column_id));
+      const transitionRank = (maxRankRow[0]?.maxRank ?? 0) + 1;
+
+      // Transition guard. A null current column means this is a pre-D1 task
+      // receiving its first column assignment — any target is allowed.
+      if (current.workflowColumnId !== null) {
+        const allowed = await tx
+          .select({ fromColumnId: workflowTransitions.fromColumnId })
+          .from(workflowTransitions)
+          .where(
+            and(
+              eq(workflowTransitions.fromColumnId, current.workflowColumnId),
+              eq(workflowTransitions.toColumnId, args.req.to_column_id),
+            ),
+          )
+          .limit(1);
+        if (!allowed[0]) {
+          throw new WorkflowTransitionForbiddenError(
+            current.workflowColumnId,
+            args.req.to_column_id,
+          );
+        }
+      }
+
+      const [eventRow] = await tx
+        .insert(events)
+        .values({
+          id: eventId,
+          taskId: args.req.task_id,
+          actorId: args.actorId,
+          kind: 'workflow_transitioned',
+          payload: {
+            from_column_id: current.workflowColumnId,
+            to_column_id: args.req.to_column_id,
+            ...(args.req.notes !== undefined ? { notes: args.req.notes } : {}),
+          },
+          operationId: args.req.operation_id,
+          createdAt: now,
+        })
+        .returning();
+
+      const [updatedRow] = await tx
+        .update(tasks)
+        .set({
+          workflowColumnId: args.req.to_column_id,
+          status: targetCol.mapsToStatus,
+          rank: transitionRank,
+          version: current.version + 1,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(tasks.id, args.req.task_id),
+            eq(tasks.version, args.req.if_match),
+          ),
+        )
+        .returning();
+
+      if (!updatedRow) throw new VersionMismatchError(rowToTask(current));
+
+      const response: TaskTransitionWorkflowRes = {
+        task: rowToTask(updatedRow),
+        event: rowToEvent(eventRow!),
+      };
+
+      await recordOperation(tx, {
         operationId: args.req.operation_id,
-        createdAt: now,
-      })
-      .returning();
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
 
-    const [updatedRow] = await tx
-      .update(tasks)
-      .set({
-        workflowColumnId: args.req.to_column_id,
-        status: targetCol.mapsToStatus,
-        rank: transitionRank,
-        version: current.version + 1,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(tasks.id, args.req.task_id),
-          eq(tasks.version, args.req.if_match),
-        ),
-      )
-      .returning();
-
-    if (!updatedRow) throw new VersionMismatchError(rowToTask(current));
-
-    const response: TaskTransitionWorkflowRes = {
-      task: rowToTask(updatedRow),
-      event: rowToEvent(eventRow!),
-    };
-
-    await recordOperation(tx, {
-      operationId: args.req.operation_id,
-      actorId: args.actorId,
-      requestHash,
-      responseBody: response,
+      return response;
     });
-
-    return response;
-  });
   } catch (err) {
     const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
     if (raced) return raced as TaskTransitionWorkflowRes;
