@@ -68,6 +68,7 @@ export const TaskSchema = z.object({
   updated_at: isoDateTime,
   workflow_column_id: uuid.nullable(),
   rank: z.number().int().min(0),
+  parent_task_id: uuid.nullable(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -165,6 +166,40 @@ export const TaskReorderResSchema = z.object({
   tasks: z.array(TaskSchema),
 });
 export type TaskReorderRes = z.infer<typeof TaskReorderResSchema>;
+
+// ── D3: Hierarchy and Dependencies ────────────────────────────────────────
+
+export const SetParentReqSchema = z.object({
+  task_id: uuid,
+  parent_task_id: uuid.nullable(),
+});
+export type SetParentReq = z.infer<typeof SetParentReqSchema>;
+
+export const SetParentResSchema = z.object({ task: TaskSchema });
+export type SetParentRes = z.infer<typeof SetParentResSchema>;
+
+export const AddDependencyReqSchema = z.object({
+  task_id: uuid,
+  blocked_by_task_id: uuid,
+});
+export type AddDependencyReq = z.infer<typeof AddDependencyReqSchema>;
+
+export const AddDependencyResSchema = z.object({ task: TaskSchema });
+export type AddDependencyRes = z.infer<typeof AddDependencyResSchema>;
+
+export const RemoveDependencyReqSchema = z.object({
+  task_id: uuid,
+  blocked_by_task_id: uuid,
+});
+export type RemoveDependencyReq = z.infer<typeof RemoveDependencyReqSchema>;
+
+export const ListDependenciesReqSchema = z.object({ task_id: uuid });
+export type ListDependenciesReq = z.infer<typeof ListDependenciesReqSchema>;
+
+export const ListDependenciesResSchema = z.object({
+  blocked_by: z.array(TaskSchema),
+});
+export type ListDependenciesRes = z.infer<typeof ListDependenciesResSchema>;
 
 export const RepoRefSchema = z.object({
   kind: z.enum(['commit', 'branch', 'pr', 'file', 'issue']),
@@ -285,6 +320,7 @@ export type ProjectGetRes = z.infer<typeof ProjectGetResSchema>;
 export const TaskGetResSchema = z.object({
   task: TaskSchema,
   agent_context: AgentContextSchema,
+  blocked_by: z.array(TaskSchema).optional(),
 });
 export type TaskGetRes = z.infer<typeof TaskGetResSchema>;
 

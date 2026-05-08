@@ -161,6 +161,7 @@ function rowToTask(r: TaskRow): Task {
     updated_at: r.updatedAt.toISOString(),
     workflow_column_id: r.workflowColumnId,
     rank: r.rank,
+    parent_task_id: r.parentTaskId,
   };
 }
 
