@@ -50,6 +50,13 @@ import {
   ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
   ActorDeactivateReqSchema,
+  AssignToSprintReqSchema,
+  RemoveFromSprintReqSchema,
+  SprintCreateReqSchema,
+  SprintGetReqSchema,
+  SprintListReqSchema,
+  SprintTransitionReqSchema,
+  UpdateTaskPointsReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -115,8 +122,23 @@ import {
   reorderTask,
   setParent,
   transitionTaskWorkflow,
+  updateTaskPoints,
   updateTaskStatus,
 } from '../../service/tasks.ts';
+import {
+  SprintAlreadyActiveError,
+  SprintNotFoundError,
+  TaskAlreadyInActiveSprintError,
+  CrossProjectSprintError,
+  InvalidSprintTransitionError,
+  activateSprint,
+  assignToSprint,
+  closeSprint,
+  getSprint,
+  listSprints,
+  removeFromSprint,
+  createSprint,
+} from '../../service/sprints.ts';
 import {
   IdempotencyConflictError,
   OperationExpiredError,
@@ -659,6 +681,96 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  // ── D4: Sprint routes ─────────────────────────────────────────────────────
+
+  api.post('/projects/:id/sprints', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = SprintCreateReqSchema.parse({ ...body, project_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await createSprint(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/projects/:id/sprints', async (c) => {
+    try {
+      const req = SprintListReqSchema.parse({
+        project_id: c.req.param('id'),
+        status: c.req.query('status') || undefined,
+      });
+      const res = await listSprints(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/sprints/:id', async (c) => {
+    try {
+      const req = SprintGetReqSchema.parse({ sprint_id: c.req.param('id') });
+      const res = await getSprint(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.patch('/sprints/:id/status', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = SprintTransitionReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res =
+        req.to_status === 'active'
+          ? await activateSprint(c.get('db'), { req, actorId: actor.id })
+          : await closeSprint(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/sprints/:id/tasks', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AssignToSprintReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await assignToSprint(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.delete('/sprints/:id/tasks/:taskId', async (c) => {
+    try {
+      const req = RemoveFromSprintReqSchema.parse({
+        sprint_id: c.req.param('id'),
+        task_id: c.req.param('taskId'),
+      });
+      const actor = c.get('actor');
+      await removeFromSprint(c.get('db'), { req, actorId: actor.id });
+      return c.json({ ok: true }, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.patch('/tasks/:id/points', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = UpdateTaskPointsReqSchema.parse({ ...body, task_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await updateTaskPoints(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   return api;
 }
 
@@ -939,6 +1051,21 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof CrossProjectRelationError) {
     return c.json({ error: 'cross_project_relation', message: err.message }, 422);
+  }
+  if (err instanceof SprintNotFoundError) {
+    return c.json({ error: 'sprint_not_found', sprint_id: err.sprintId }, 404);
+  }
+  if (err instanceof SprintAlreadyActiveError) {
+    return c.json({ error: 'sprint_already_active', sprint_id: err.existingSprintId }, 409);
+  }
+  if (err instanceof TaskAlreadyInActiveSprintError) {
+    return c.json({ error: 'task_already_in_active_sprint', task_id: err.taskId }, 409);
+  }
+  if (err instanceof CrossProjectSprintError) {
+    return c.json({ error: 'cross_project_sprint', message: err.message }, 422);
+  }
+  if (err instanceof InvalidSprintTransitionError) {
+    return c.json({ error: 'invalid_sprint_transition', message: err.message }, 422);
   }
   if (err instanceof IdempotencyConflictError) {
     return c.json(

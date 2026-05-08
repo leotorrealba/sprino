@@ -26,6 +26,7 @@ import {
   pgEnum,
   boolean,
   primaryKey,
+  date,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
@@ -58,6 +59,11 @@ export const eventKindEnum = pgEnum('event_kind', [
 export const attachmentStatusEnum = pgEnum('attachment_status', [
   'pending',
   'ready',
+]);
+export const sprintStatusEnum = pgEnum('sprint_status', [
+  'planning',
+  'active',
+  'completed',
 ]);
 
 // ────────────────────────────────────────────────────────────────────────
@@ -176,6 +182,7 @@ export const tasks = pgTable(
     ),
     rank: integer('rank').notNull().default(0),
     parentTaskId: uuid('parent_task_id').references((): AnyPgColumn => tasks.id),
+    points: integer('points'),
   },
   (t) => ({
     projectIdx: index('tasks_project_idx').on(t.projectId),
@@ -334,6 +341,43 @@ export const taskDependencies = pgTable(
   }),
 );
 
+export const sprints = pgTable(
+  'sprints',
+  {
+    id: uuid('id').primaryKey(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    name: text('name').notNull(),
+    status: sprintStatusEnum('status').notNull().default('planning'),
+    startsOn: date('starts_on', { mode: 'string' }).notNull(),
+    endsOn: date('ends_on', { mode: 'string' }).notNull(),
+    version: integer('version').notNull().default(1),
+    createdBy: uuid('created_by').notNull().references(() => actors.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdx: index('sprints_project_id_idx').on(t.projectId),
+    statusIdx: index('sprints_status_idx').on(t.projectId, t.status),
+  }),
+);
+
+export const sprintTasks = pgTable(
+  'sprint_tasks',
+  {
+    sprintId: uuid('sprint_id')
+      .notNull()
+      .references(() => sprints.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.sprintId, t.taskId] }),
+    taskIdx: index('sprint_tasks_task_idx').on(t.taskId),
+  }),
+);
+
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
@@ -355,3 +399,7 @@ export type WorkflowTransitionRow = typeof workflowTransitions.$inferSelect;
 export type NewWorkflowTransitionRow = typeof workflowTransitions.$inferInsert;
 export type TaskDependencyRow = typeof taskDependencies.$inferSelect;
 export type NewTaskDependencyRow = typeof taskDependencies.$inferInsert;
+export type SprintRow = typeof sprints.$inferSelect;
+export type NewSprintRow = typeof sprints.$inferInsert;
+export type SprintTaskRow = typeof sprintTasks.$inferSelect;
+export type NewSprintTaskRow = typeof sprintTasks.$inferInsert;

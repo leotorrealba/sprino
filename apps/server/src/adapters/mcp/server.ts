@@ -40,6 +40,13 @@ import {
   TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
   TaskTransitionWorkflowReqSchema,
+  AssignToSprintReqSchema,
+  RemoveFromSprintReqSchema,
+  SprintCreateReqSchema,
+  SprintGetReqSchema,
+  SprintListReqSchema,
+  SprintTransitionReqSchema,
+  UpdateTaskPointsReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
   ActorGetReqSchema,
@@ -84,7 +91,22 @@ import {
   setParent,
   transitionTaskWorkflow,
   updateTaskStatus,
+  updateTaskPoints,
 } from '../../service/tasks.ts';
+import {
+  SprintAlreadyActiveError,
+  SprintNotFoundError,
+  TaskAlreadyInActiveSprintError,
+  CrossProjectSprintError,
+  InvalidSprintTransitionError,
+  activateSprint,
+  assignToSprint,
+  closeSprint,
+  getSprint,
+  listSprints,
+  removeFromSprint,
+  createSprint,
+} from '../../service/sprints.ts';
 import {
   IdempotencyConflictError,
   OperationExpiredError,
@@ -457,6 +479,104 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.sprint.create',
+    description: 'Create a new sprint in a project. Idempotent via operation_id. Sprint starts in planning status.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'project_id', 'name', 'starts_on', 'ends_on'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        project_id: { type: 'string', format: 'uuid' },
+        name: { type: 'string', minLength: 1, maxLength: 200 },
+        starts_on: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        ends_on: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      },
+    },
+  },
+  {
+    name: 'sprino.sprint.transition',
+    description: 'Transition sprint status: planning→active or active→completed. Closing returns carry_over_tasks.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'sprint_id', 'to_status', 'if_match'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        sprint_id: { type: 'string', format: 'uuid' },
+        to_status: { type: 'string', enum: ['active', 'completed'] },
+        if_match: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
+  {
+    name: 'sprino.sprint.list',
+    description: 'List sprints for a project. Filter by status: planning, active, or completed.',
+    inputSchema: {
+      type: 'object',
+      required: ['project_id'],
+      additionalProperties: false,
+      properties: {
+        project_id: { type: 'string', format: 'uuid' },
+        status: { type: 'string', enum: ['planning', 'active', 'completed'] },
+      },
+    },
+  },
+  {
+    name: 'sprino.sprint.get',
+    description: 'Get a sprint with its tasks and burndown series (task count or story points).',
+    inputSchema: {
+      type: 'object',
+      required: ['sprint_id'],
+      additionalProperties: false,
+      properties: {
+        sprint_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.assign_sprint',
+    description: 'Assign a task to a sprint. Idempotent. A task can only be in one active sprint at a time.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'sprint_id', 'task_id'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        sprint_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.remove_from_sprint',
+    description: 'Remove a task from a sprint. No-op if not assigned.',
+    inputSchema: {
+      type: 'object',
+      required: ['sprint_id', 'task_id'],
+      additionalProperties: false,
+      properties: {
+        sprint_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.set_points',
+    description: 'Set or clear story points on a task. Null clears the estimate.',
+    inputSchema: {
+      type: 'object',
+      required: ['operation_id', 'task_id', 'if_match'],
+      additionalProperties: false,
+      properties: {
+        operation_id: { type: 'string', format: 'uuid' },
+        task_id: { type: 'string', format: 'uuid' },
+        points: { type: ['integer', 'null'], minimum: 0 },
+        if_match: { type: 'integer', minimum: 1 },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -650,6 +770,44 @@ async function callTool(
       const res = await listAttachments(db, { req });
       return wrapToolResult(res);
     }
+    case 'sprino.sprint.create': {
+      const req = SprintCreateReqSchema.parse(args);
+      const res = await createSprint(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.sprint.transition': {
+      const req = SprintTransitionReqSchema.parse(args);
+      const res =
+        req.to_status === 'active'
+          ? await activateSprint(db, { req, actorId: actor.id })
+          : await closeSprint(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.sprint.list': {
+      const req = SprintListReqSchema.parse(args);
+      const res = await listSprints(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.sprint.get': {
+      const req = SprintGetReqSchema.parse(args);
+      const res = await getSprint(db, { req });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.assign_sprint': {
+      const req = AssignToSprintReqSchema.parse(args);
+      const res = await assignToSprint(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.remove_from_sprint': {
+      const req = RemoveFromSprintReqSchema.parse(args);
+      await removeFromSprint(db, { req, actorId: actor.id });
+      return wrapToolResult({ ok: true });
+    }
+    case 'sprino.task.set_points': {
+      const req = UpdateTaskPointsReqSchema.parse(args);
+      const res = await updateTaskPoints(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
   }
@@ -789,6 +947,21 @@ function translateError(
   }
   if (err instanceof AttachmentTaskNotFoundError) {
     return rpcError(id, -32004, 'task_not_found', { task_id: err.taskId });
+  }
+  if (err instanceof SprintNotFoundError) {
+    return rpcError(id, -32004, 'sprint_not_found', { sprint_id: err.sprintId });
+  }
+  if (err instanceof SprintAlreadyActiveError) {
+    return rpcError(id, -32009, 'sprint_already_active', { sprint_id: err.existingSprintId });
+  }
+  if (err instanceof TaskAlreadyInActiveSprintError) {
+    return rpcError(id, -32009, 'task_already_in_active_sprint', { task_id: err.taskId });
+  }
+  if (err instanceof CrossProjectSprintError) {
+    return rpcError(id, -32602, 'cross_project_sprint', {});
+  }
+  if (err instanceof InvalidSprintTransitionError) {
+    return rpcError(id, -32602, 'invalid_sprint_transition', { from: err.from, to: err.to });
   }
   console.error('Unhandled MCP error:', err);
   return rpcError(id, -32603, 'Internal error');

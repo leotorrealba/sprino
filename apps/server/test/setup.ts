@@ -79,7 +79,7 @@ export async function resetDb(): Promise<void> {
   // listed explicitly so its sequence resets cleanly even if FK CASCADE
   // ordering differs across Postgres versions.
   await db.execute(
-    sql`TRUNCATE TABLE attachments, events, operations, tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE attachments, events, operations, tasks, sprints, sprint_tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
   );
 
   // Re-import env actors (FIXTURE_ACTOR_ID + agent) into actors +

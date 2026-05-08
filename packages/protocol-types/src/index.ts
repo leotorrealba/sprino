@@ -67,6 +67,7 @@ export const TaskSchema = z.object({
   workflow_column_id: uuid.nullable(),
   rank: z.number().int().min(0),
   parent_task_id: uuid.nullable(),
+  points: z.number().int().min(0).nullable(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 

@@ -4,11 +4,12 @@ import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
 import { BoardFilters, type BoardFilterState } from './components/BoardFilters';
 import { Members } from './components/Members';
+import { SprintBoard } from './components/SprintBoard';
 import { TaskWorkflowBoard } from './components/TaskWorkflowBoard';
 import { uuidv7 } from './lib/uuid';
 
 type LoadState = 'idle' | 'loading' | 'error';
-type View = 'tasks' | 'members' | 'board';
+type View = 'tasks' | 'members' | 'board' | 'sprint';
 
 const STATUSES: TaskStatus[] = ['todo', 'doing', 'done', 'blocked'];
 
@@ -295,6 +296,16 @@ export function App() {
               >
                 Board
               </button>
+              <button
+                onClick={() => setView('sprint')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'sprint'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Sprint
+              </button>
             </nav>
             <select
               value={selectedProjectId}
@@ -380,6 +391,12 @@ export function App() {
       <main className="mx-auto max-w-4xl px-6 py-8">
         {view === 'members' ? (
           <Members token={token} />
+        ) : view === 'sprint' ? (
+          selectedProjectId ? (
+            <SprintBoard projectId={selectedProjectId} token={token} />
+          ) : (
+            <p className="text-sm text-slate-400">Select a project to view its sprint.</p>
+          )
         ) : view === 'board' ? (
           selectedProjectId && (
             <>

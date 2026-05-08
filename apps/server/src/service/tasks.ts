@@ -56,6 +56,8 @@ import {
   type TaskStatus,
   type TaskUpdateStatusReq,
   type TaskUpdateStatusRes,
+  type UpdateTaskPointsReq,
+  type UpdateTaskPointsRes,
   type WorkflowColumn,
   type WorkflowColumnsListRes,
   type TaskTransitionWorkflowReq,
@@ -196,7 +198,7 @@ export function decodePageToken(token: string): { offset: number } | null {
 // Row → wire-shape conversion
 // ────────────────────────────────────────────────────────────────────────
 
-function rowToTask(r: TaskRow): Task {
+export function rowToTask(r: TaskRow): Task {
   return {
     id: r.id,
     project_id: r.projectId,
@@ -211,6 +213,7 @@ function rowToTask(r: TaskRow): Task {
     workflow_column_id: r.workflowColumnId,
     rank: r.rank,
     parent_task_id: r.parentTaskId,
+    points: r.points ?? null,
   };
 }
 
@@ -1039,4 +1042,72 @@ export async function listDependencies(
     .where(inArray(tasks.id, blockerIds));
 
   return { blocked_by: blockerRows.map(rowToTask) };
+}
+
+export async function updateTaskPoints(
+  db: Db,
+  args: { req: UpdateTaskPointsReq; actorId: string },
+): Promise<UpdateTaskPointsRes> {
+  const requestHash = hashRequest(args.req);
+  const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
+  if (cached) return cached as UpdateTaskPointsRes;
+
+  const eventId = uuidv7();
+  const now = new Date();
+
+  try {
+    return await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, args.req.task_id))
+        .for('update');
+      const current = rows[0];
+      if (!current) throw new TaskNotFoundError(args.req.task_id);
+      if (current.version !== args.req.if_match) {
+        throw new VersionMismatchError(rowToTask(current));
+      }
+
+      const [updated] = await tx
+        .update(tasks)
+        .set({
+          points: args.req.points,
+          version: current.version + 1,
+          updatedAt: now,
+        })
+        .where(and(eq(tasks.id, args.req.task_id), eq(tasks.version, args.req.if_match)))
+        .returning();
+
+      const [eventRow] = await tx
+        .insert(events)
+        .values({
+          id: eventId,
+          taskId: args.req.task_id,
+          actorId: args.actorId,
+          kind: 'context_updated',
+          payload: { field: 'points', new: args.req.points },
+          operationId: args.req.operation_id,
+          createdAt: now,
+        })
+        .returning();
+
+      const response: UpdateTaskPointsRes = {
+        task: rowToTask(updated!),
+        event: rowToEvent(eventRow!),
+      };
+
+      await recordOperation(tx, {
+        operationId: args.req.operation_id,
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
+
+      return response;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as UpdateTaskPointsRes;
+    throw err;
+  }
 }
