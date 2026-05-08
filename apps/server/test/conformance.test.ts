@@ -380,9 +380,13 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       'sprino.project.create',
       'sprino.project.get',
       'sprino.project.list',
+      'sprino.task.add_dependency',
       'sprino.task.create',
       'sprino.task.get',
+      'sprino.task.list_dependencies',
+      'sprino.task.remove_dependency',
       'sprino.task.reorder',
+      'sprino.task.set_parent',
       'sprino.task.transition_workflow',
       'sprino.task.update_status',
     ]);
