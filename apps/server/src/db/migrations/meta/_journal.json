@@ -64,6 +64,13 @@
       "when": 1777881600000,
       "tag": "0008_task_rank",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778140800000,
+      "tag": "0009_task_hierarchy",
+      "breakpoints": true
     }
   ]
 }

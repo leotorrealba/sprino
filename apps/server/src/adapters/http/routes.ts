@@ -37,6 +37,10 @@ import {
   TaskCreateReqSchema,
   TaskGetReqSchema,
   TaskListReqSchema,
+  AddDependencyReqSchema,
+  ListDependenciesReqSchema,
+  RemoveDependencyReqSchema,
+  SetParentReqSchema,
   TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
   TaskTransitionWorkflowReqSchema,
@@ -88,18 +92,28 @@ import {
 import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
+  ChildrenNotDoneError,
+  CrossProjectRelationError,
+  DependencyCycleDetectedError,
+  DependencyNotResolvedError,
+  HierarchyDepthExceededError,
+  ParentCycleDetectedError,
   TaskNotFoundError,
   TaskNotInColumnError,
   VersionMismatchError,
   WorkflowColumnNotFoundError,
   WorkflowTransitionForbiddenError,
+  addDependency,
   createTask,
   getTask,
+  listDependencies,
   listRelatedTasks,
   listTaskEvents,
   listTasks,
   listWorkflowColumns,
+  removeDependency,
   reorderTask,
+  setParent,
   transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
@@ -181,9 +195,10 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const req = TaskListReqSchema.parse({
         project_id: c.req.query('project_id'),
         status: statusParam.length > 0 ? statusParam : undefined,
-        assignee_id: c.req.query('assignee_id') || undefined,
-        limit: c.req.query('limit'),
-        offset: c.req.query('offset'),
+        assignee_id: c.req.query('assignee_id') ?? undefined,
+        parent_task_id: c.req.query('parent_task_id') ?? undefined,
+        limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
+        offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
       });
       const res = await listTasks(c.get('db'), { req });
       return c.json(res, 200);
@@ -259,6 +274,65 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       });
       const actor = c.get('actor');
       const res = await reorderTask(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.patch('/tasks/:id/parent', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = SetParentReqSchema.parse({ ...body, task_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await setParent(c.get('db'), {
+        taskId: req.task_id,
+        parentTaskId: req.parent_task_id,
+        actorId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.post('/tasks/:id/dependencies', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AddDependencyReqSchema.parse({
+        task_id: c.req.param('id'),
+        blocked_by_task_id: body?.blocked_by_task_id,
+      });
+      const actor = c.get('actor');
+      const res = await addDependency(c.get('db'), {
+        fromTaskId: req.task_id,
+        toTaskId: req.blocked_by_task_id,
+        actorId: actor.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.delete('/tasks/:id/dependencies/:depId', async (c) => {
+    try {
+      const actor = c.get('actor');
+      await removeDependency(c.get('db'), {
+        fromTaskId: c.req.param('id'),
+        toTaskId: c.req.param('depId'),
+        actorId: actor.id,
+      });
+      return new Response(null, { status: 204 });
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/tasks/:id/dependencies', async (c) => {
+    try {
+      const req = ListDependenciesReqSchema.parse({ task_id: c.req.param('id') });
+      const res = await listDependencies(c.get('db'), { taskId: req.task_id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -847,6 +921,24 @@ function errorResponse(c: any, err: unknown): Response {
       { error: 'workflow_column_not_found', column_id: err.columnId },
       404,
     );
+  }
+  if (err instanceof HierarchyDepthExceededError) {
+    return c.json({ error: 'hierarchy_depth_exceeded', message: err.message }, 422);
+  }
+  if (err instanceof ParentCycleDetectedError) {
+    return c.json({ error: 'parent_cycle_detected', message: err.message }, 422);
+  }
+  if (err instanceof DependencyCycleDetectedError) {
+    return c.json({ error: 'dependency_cycle_detected', message: err.message }, 422);
+  }
+  if (err instanceof DependencyNotResolvedError) {
+    return c.json({ error: 'dependency_not_resolved', message: err.message }, 409);
+  }
+  if (err instanceof ChildrenNotDoneError) {
+    return c.json({ error: 'children_not_done', message: err.message }, 409);
+  }
+  if (err instanceof CrossProjectRelationError) {
+    return c.json({ error: 'cross_project_relation', message: err.message }, 422);
   }
   if (err instanceof IdempotencyConflictError) {
     return c.json(

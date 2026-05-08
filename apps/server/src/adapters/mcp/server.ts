@@ -33,6 +33,10 @@ import {
   ProjectGetReqSchema,
   TaskCreateReqSchema,
   TaskGetReqSchema,
+  AddDependencyReqSchema,
+  ListDependenciesReqSchema,
+  RemoveDependencyReqSchema,
+  SetParentReqSchema,
   TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
   TaskTransitionWorkflowReqSchema,
@@ -71,9 +75,13 @@ import {
   VersionMismatchError,
   WorkflowColumnNotFoundError,
   WorkflowTransitionForbiddenError,
+  addDependency,
   createTask,
   getTask,
+  listDependencies,
+  removeDependency,
   reorderTask,
+  setParent,
   transitionTaskWorkflow,
   updateTaskStatus,
 } from '../../service/tasks.ts';
@@ -394,6 +402,61 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.task.set_parent',
+    description:
+      'Set or clear the parent task for a task. parent_task_id=null makes the task a root. Max hierarchy depth is 3 levels. Rejects cycles and cross-project parents.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id', 'parent_task_id'],
+      additionalProperties: false,
+      properties: {
+        task_id: { type: 'string', format: 'uuid' },
+        parent_task_id: { type: ['string', 'null'], format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.add_dependency',
+    description:
+      'Mark a task as blocked by another task. The from task (task_id) cannot move to doing or done until the blocking task (blocked_by_task_id) is done. Auto-sets task status to blocked. Rejects cycles.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id', 'blocked_by_task_id'],
+      additionalProperties: false,
+      properties: {
+        task_id: { type: 'string', format: 'uuid' },
+        blocked_by_task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.remove_dependency',
+    description:
+      'Remove a blocked-by dependency. Does not auto-update task status — call task.update_status separately if the task is ready to proceed.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id', 'blocked_by_task_id'],
+      additionalProperties: false,
+      properties: {
+        task_id: { type: 'string', format: 'uuid' },
+        blocked_by_task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.task.list_dependencies',
+    description:
+      'List all tasks that are blocking the given task (its blocked_by list).',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      additionalProperties: false,
+      properties: {
+        task_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -498,6 +561,38 @@ async function callTool(
     case 'sprino.task.reorder': {
       const req = TaskReorderReqSchema.parse(args);
       const res = await reorderTask(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.set_parent': {
+      const req = SetParentReqSchema.parse(args);
+      const res = await setParent(db, {
+        taskId: req.task_id,
+        parentTaskId: req.parent_task_id,
+        actorId: actor.id,
+      });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.add_dependency': {
+      const req = AddDependencyReqSchema.parse(args);
+      const res = await addDependency(db, {
+        fromTaskId: req.task_id,
+        toTaskId: req.blocked_by_task_id,
+        actorId: actor.id,
+      });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.remove_dependency': {
+      const req = RemoveDependencyReqSchema.parse(args);
+      await removeDependency(db, {
+        fromTaskId: req.task_id,
+        toTaskId: req.blocked_by_task_id,
+        actorId: actor.id,
+      });
+      return wrapToolResult({ ok: true });
+    }
+    case 'sprino.task.list_dependencies': {
+      const req = ListDependenciesReqSchema.parse(args);
+      const res = await listDependencies(db, { taskId: req.task_id });
       return wrapToolResult(res);
     }
     case 'sprino.actor.register': {

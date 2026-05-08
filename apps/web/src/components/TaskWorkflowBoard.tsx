@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Task } from '@sprino/protocol-types';
 import type { BoardFilterState } from './BoardFilters';
 import { uuidv7 } from '../lib/uuid';
+import { TaskHierarchy } from './TaskHierarchy';
 
 interface WorkflowColumn {
   id: string;
@@ -117,6 +118,11 @@ export function TaskWorkflowBoard({ projectId, token, tasks, filters: _filters, 
                 return (
                   <div key={task.id} className="bg-white rounded border border-slate-200 p-2 shadow-sm">
                     <p className="text-sm text-slate-800 mb-1">{task.title}</p>
+                    <TaskHierarchy
+                      task={task}
+                      projectId={projectId}
+                      authHeader={authHeader}
+                    />
                     {targets.length > 0 && (
                       <select
                         className="text-xs border border-slate-200 rounded px-1 py-0.5 w-full text-slate-600 disabled:opacity-50"
