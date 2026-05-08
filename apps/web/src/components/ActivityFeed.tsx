@@ -47,8 +47,18 @@ function describe(event: EventWithActor): string {
     }
     case 'assigned':
       return `assigned ${taskLabel}`;
-    case 'context_updated':
+    case 'context_updated': {
+      const p = event.payload as { field?: string; new?: unknown } | null;
+      const field = p?.field;
+      if (field === 'parent_task_id') {
+        return p?.new === null
+          ? `removed ${taskLabel} from its parent`
+          : `set a parent for ${taskLabel}`;
+      }
+      if (field === 'dependency_added') return `marked ${taskLabel} as blocked`;
+      if (field === 'dependency_removed') return `removed a dependency from ${taskLabel}`;
       return `updated context on ${taskLabel}`;
+    }
     case 'commented':
       return `commented on ${taskLabel}`;
     default:

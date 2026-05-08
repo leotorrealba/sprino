@@ -278,6 +278,7 @@ export const TaskListReqSchema = z
     project_id: uuid,
     status: z.array(TaskStatusSchema).optional(),
     assignee_id: uuid.optional(),
+    parent_task_id: uuid.optional(),
   })
   .merge(paginationSchema(MAX_LIMITS.tasks));
 export type TaskListReq = z.infer<typeof TaskListReqSchema>;

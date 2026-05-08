@@ -477,6 +477,9 @@ export async function listTasks(
   if (args.req.assignee_id) {
     conditions.push(eq(tasks.assigneeId, args.req.assignee_id));
   }
+  if (args.req.parent_task_id) {
+    conditions.push(eq(tasks.parentTaskId, args.req.parent_task_id));
+  }
 
   const rows = await db
     .select()

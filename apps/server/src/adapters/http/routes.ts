@@ -195,9 +195,10 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const req = TaskListReqSchema.parse({
         project_id: c.req.query('project_id'),
         status: statusParam.length > 0 ? statusParam : undefined,
-        assignee_id: c.req.query('assignee_id') || undefined,
-        limit: c.req.query('limit'),
-        offset: c.req.query('offset'),
+        assignee_id: c.req.query('assignee_id') ?? undefined,
+        parent_task_id: c.req.query('parent_task_id') ?? undefined,
+        limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
+        offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
       });
       const res = await listTasks(c.get('db'), { req });
       return c.json(res, 200);
