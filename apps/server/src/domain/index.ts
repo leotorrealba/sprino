@@ -654,3 +654,106 @@ export const ProjectCreateResSchema = z.object({
   project: ProjectSchema,
 });
 export type ProjectCreateRes = z.infer<typeof ProjectCreateResSchema>;
+
+// ── D4: Sprint Planning ────────────────────────────────────────────────────
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+
+export const SprintStatusSchema = z.enum(['planning', 'active', 'completed']);
+export type SprintStatus = z.infer<typeof SprintStatusSchema>;
+
+export const SprintSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(200),
+  status: SprintStatusSchema,
+  starts_on: isoDate,
+  ends_on: isoDate,
+  version: z.number().int().min(1),
+  created_by: uuid,
+  created_at: isoDateTime,
+  updated_at: isoDateTime,
+});
+export type Sprint = z.infer<typeof SprintSchema>;
+
+export const BurndownPointSchema = z.object({
+  date: isoDate,
+  remaining: z.number().int().min(0),
+});
+export type BurndownPoint = z.infer<typeof BurndownPointSchema>;
+
+export const SprintGetReqSchema = z.object({ sprint_id: uuid });
+export type SprintGetReq = z.infer<typeof SprintGetReqSchema>;
+
+export const SprintGetResSchema = z.object({
+  sprint: SprintSchema,
+  tasks: z.array(TaskSchema),
+  burndown_series: z.array(BurndownPointSchema),
+  burndown_metric: z.enum(['tasks', 'points']),
+});
+export type SprintGetRes = z.infer<typeof SprintGetResSchema>;
+
+export const SprintCreateReqSchema = z.object({
+  operation_id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(200),
+  starts_on: isoDate,
+  ends_on: isoDate,
+});
+export type SprintCreateReq = z.infer<typeof SprintCreateReqSchema>;
+
+export const SprintCreateResSchema = z.object({ sprint: SprintSchema });
+export type SprintCreateRes = z.infer<typeof SprintCreateResSchema>;
+
+export const SprintTransitionReqSchema = z.object({
+  operation_id: uuid,
+  sprint_id: uuid,
+  to_status: z.enum(['active', 'completed']),
+  if_match: z.number().int().min(1),
+});
+export type SprintTransitionReq = z.infer<typeof SprintTransitionReqSchema>;
+
+export const SprintTransitionResSchema = z.object({
+  sprint: SprintSchema,
+  carry_over_tasks: z.array(TaskSchema).optional(),
+});
+export type SprintTransitionRes = z.infer<typeof SprintTransitionResSchema>;
+
+export const SprintListReqSchema = z.object({
+  project_id: uuid,
+  status: SprintStatusSchema.optional(),
+});
+export type SprintListReq = z.infer<typeof SprintListReqSchema>;
+
+export const SprintListResSchema = z.object({ sprints: z.array(SprintSchema) });
+export type SprintListRes = z.infer<typeof SprintListResSchema>;
+
+export const AssignToSprintReqSchema = z.object({
+  operation_id: uuid,
+  sprint_id: uuid,
+  task_id: uuid,
+});
+export type AssignToSprintReq = z.infer<typeof AssignToSprintReqSchema>;
+
+export const AssignToSprintResSchema = z.object({ task: TaskSchema });
+export type AssignToSprintRes = z.infer<typeof AssignToSprintResSchema>;
+
+export const RemoveFromSprintReqSchema = z.object({
+  sprint_id: uuid,
+  task_id: uuid,
+});
+export type RemoveFromSprintReq = z.infer<typeof RemoveFromSprintReqSchema>;
+
+export const UpdateTaskPointsReqSchema = z.object({
+  operation_id: uuid,
+  task_id: uuid,
+  points: z.number().int().min(0).nullable(),
+  if_match: z.number().int().min(1),
+});
+export type UpdateTaskPointsReq = z.infer<typeof UpdateTaskPointsReqSchema>;
+
+export const UpdateTaskPointsResSchema = z.object({
+  task: TaskSchema,
+  event: EventSchema,
+});
+export type UpdateTaskPointsRes = z.infer<typeof UpdateTaskPointsResSchema>;
