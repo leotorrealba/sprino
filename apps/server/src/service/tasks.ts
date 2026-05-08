@@ -196,7 +196,7 @@ export function decodePageToken(token: string): { offset: number } | null {
 // Row → wire-shape conversion
 // ────────────────────────────────────────────────────────────────────────
 
-function rowToTask(r: TaskRow): Task {
+export function rowToTask(r: TaskRow): Task {
   return {
     id: r.id,
     project_id: r.projectId,
@@ -211,6 +211,7 @@ function rowToTask(r: TaskRow): Task {
     workflow_column_id: r.workflowColumnId,
     rank: r.rank,
     parent_task_id: r.parentTaskId,
+    points: r.points ?? null,
   };
 }
 
