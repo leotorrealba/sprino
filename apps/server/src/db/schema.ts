@@ -26,6 +26,7 @@ import {
   pgEnum,
   boolean,
   primaryKey,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 // ────────────────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ export const tasks = pgTable(
       () => workflowColumns.id,
     ),
     rank: integer('rank').notNull().default(0),
+    parentTaskId: uuid('parent_task_id').references((): AnyPgColumn => tasks.id),
   },
   (t) => ({
     projectIdx: index('tasks_project_idx').on(t.projectId),
@@ -313,6 +315,25 @@ export const workflowTransitions = pgTable(
   }),
 );
 
+export const taskDependencies = pgTable(
+  'task_dependencies',
+  {
+    fromTaskId: uuid('from_task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    toTaskId: uuid('to_task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.fromTaskId, t.toTaskId] }),
+    toTaskIdx: index('task_dependencies_to_idx').on(t.toTaskId),
+  }),
+);
+
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
@@ -332,3 +353,5 @@ export type WorkflowColumnRow = typeof workflowColumns.$inferSelect;
 export type NewWorkflowColumnRow = typeof workflowColumns.$inferInsert;
 export type WorkflowTransitionRow = typeof workflowTransitions.$inferSelect;
 export type NewWorkflowTransitionRow = typeof workflowTransitions.$inferInsert;
+export type TaskDependencyRow = typeof taskDependencies.$inferSelect;
+export type NewTaskDependencyRow = typeof taskDependencies.$inferInsert;
