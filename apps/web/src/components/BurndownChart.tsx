@@ -26,15 +26,21 @@ export function BurndownChart({ sprintId, token }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetch(`/api/sprints/${sprintId}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
     })
       .then((r) => {
         if (!r.ok) throw new Error(`sprint detail failed: ${r.status}`);
         return r.json() as Promise<SprintDetail>;
       })
       .then(setData)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === 'AbortError') return;
+        setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => controller.abort();
   }, [sprintId, token]);
 
   if (error) return <p className="text-xs text-rose-600 px-2">{error}</p>;

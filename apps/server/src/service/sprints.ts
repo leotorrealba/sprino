@@ -337,43 +337,45 @@ export async function assignToSprint(
   db: Db,
   args: { req: AssignToSprintReq; actorId: string },
 ): Promise<AssignToSprintRes> {
-  const now = new Date();
+  return await db.transaction(async (tx) => {
+    const now = new Date();
 
-  const sprintRows = await db.select().from(sprints).where(eq(sprints.id, args.req.sprint_id));
-  const sprint = sprintRows[0];
-  if (!sprint) throw new SprintNotFoundError(args.req.sprint_id);
+    const sprintRows = await tx.select().from(sprints).where(eq(sprints.id, args.req.sprint_id));
+    const sprint = sprintRows[0];
+    if (!sprint) throw new SprintNotFoundError(args.req.sprint_id);
 
-  const taskRows = await db.select().from(tasks).where(eq(tasks.id, args.req.task_id));
-  const task = taskRows[0];
-  if (!task) throw new TaskNotFoundError(args.req.task_id);
+    const taskRows = await tx.select().from(tasks).where(eq(tasks.id, args.req.task_id));
+    const task = taskRows[0];
+    if (!task) throw new TaskNotFoundError(args.req.task_id);
 
-  if (sprint.projectId !== task.projectId) throw new CrossProjectSprintError();
+    if (sprint.projectId !== task.projectId) throw new CrossProjectSprintError();
 
-  const existingActive = await db
-    .select({ sprintId: sprintTasks.sprintId })
-    .from(sprintTasks)
-    .innerJoin(sprints, eq(sprints.id, sprintTasks.sprintId))
-    .where(and(eq(sprintTasks.taskId, args.req.task_id), eq(sprints.status, 'active')));
-  if (existingActive.length > 0) {
-    throw new TaskAlreadyInActiveSprintError(args.req.task_id);
-  }
+    const existingActive = await tx
+      .select({ sprintId: sprintTasks.sprintId })
+      .from(sprintTasks)
+      .innerJoin(sprints, eq(sprints.id, sprintTasks.sprintId))
+      .where(and(eq(sprintTasks.taskId, args.req.task_id), eq(sprints.status, 'active')));
+    if (existingActive.length > 0) {
+      throw new TaskAlreadyInActiveSprintError(args.req.task_id);
+    }
 
-  await db
-    .insert(sprintTasks)
-    .values({ sprintId: args.req.sprint_id, taskId: args.req.task_id, addedAt: now })
-    .onConflictDoNothing();
+    await tx
+      .insert(sprintTasks)
+      .values({ sprintId: args.req.sprint_id, taskId: args.req.task_id, addedAt: now })
+      .onConflictDoNothing();
 
-  await db.insert(events).values({
-    id: uuidv7(),
-    taskId: args.req.task_id,
-    actorId: args.actorId,
-    kind: 'context_updated',
-    payload: { field: 'sprint_id', new: args.req.sprint_id },
-    operationId: uuidv7(),
-    createdAt: now,
+    await tx.insert(events).values({
+      id: uuidv7(),
+      taskId: args.req.task_id,
+      actorId: args.actorId,
+      kind: 'context_updated',
+      payload: { field: 'sprint_id', new: args.req.sprint_id },
+      operationId: uuidv7(),
+      createdAt: now,
+    });
+
+    return { task: rowToTask(task) };
   });
-
-  return { task: rowToTask(task) };
 }
 
 export async function removeFromSprint(
