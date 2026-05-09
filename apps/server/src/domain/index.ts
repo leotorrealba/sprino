@@ -88,7 +88,7 @@ export const EventSchema = z.object({
   task_id: uuid,
   actor_id: uuid,
   kind: EventKindSchema,
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
   operation_id: uuid,
   created_at: isoDateTime,
 });
@@ -371,10 +371,7 @@ const ActorRegisterBaseReqShape = z.object({
   // fixtures assert on.
   operation_id: uuid,
   display_name: z
-    .string({
-      required_error: 'Required field is missing.',
-      invalid_type_error: 'Must be a string.',
-    })
+    .string({ error: 'Required field is missing.' })
     .min(1, { message: 'Required field is missing.' })
     .max(200),
 });
@@ -403,9 +400,7 @@ export type ActorRegisterReq =
 
 export const ActorRegisterReqSchema = ActorRegisterBaseReqShape.extend({
   kind: z
-    .string({
-      required_error: 'Required field is missing.',
-    })
+    .string({ error: 'Required field is missing.' })
     .refine((kind) => kind === 'human' || kind === 'agent', {
       message: ACTOR_KIND_UNSUPPORTED,
     }),
