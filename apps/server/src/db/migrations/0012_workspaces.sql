@@ -8,13 +8,10 @@ CREATE TABLE workspaces (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX workspaces_slug_idx ON workspaces(slug);
-
 CREATE TABLE workspace_members (
   workspace_id UUID  NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   actor_id     UUID  NOT NULL REFERENCES actors(id)     ON DELETE CASCADE,
-  role         TEXT  NOT NULL DEFAULT 'member'
-                     CHECK (role IN ('admin', 'member')),
+  role         actor_role  NOT NULL DEFAULT 'member',
   joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (workspace_id, actor_id)
 );
@@ -29,7 +26,8 @@ CREATE INDEX projects_workspace_idx ON projects(workspace_id);
 
 -- Bootstrap: default workspace
 INSERT INTO workspaces (id, name, slug, created_by)
-  VALUES ('00000000-0000-7000-8000-000000000001', 'Default', 'default', NULL);
+  VALUES ('00000000-0000-7000-8000-000000000001', 'Default', 'default', NULL)
+ON CONFLICT DO NOTHING;
 
 -- Backfill existing projects
 UPDATE projects
@@ -40,6 +38,6 @@ ALTER TABLE projects ALTER COLUMN workspace_id SET NOT NULL;
 
 -- Backfill existing actors as members (admin role mirrors existing actors.role)
 INSERT INTO workspace_members (workspace_id, actor_id, role)
-SELECT '00000000-0000-7000-8000-000000000001', id, role::text
+SELECT '00000000-0000-7000-8000-000000000001', id, COALESCE(role, 'member'::actor_role)
 FROM actors
 ON CONFLICT DO NOTHING;
