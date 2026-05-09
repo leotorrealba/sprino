@@ -474,9 +474,7 @@ export async function listTasks(
   db: Db,
   args: { req: TaskListReq; workspaceId: string },
 ): Promise<TaskListRes> {
-  if (args.req.project_id) {
-    await assertProjectInWorkspace(db, { projectId: args.req.project_id, workspaceId: args.workspaceId });
-  }
+  await assertProjectInWorkspace(db, { projectId: args.req.project_id, workspaceId: args.workspaceId });
 
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
@@ -514,15 +512,13 @@ export async function listTasks(
 
 export async function getTask(
   db: Db,
-  args: { req: TaskGetReq; workspaceId?: string },
+  args: { req: TaskGetReq; workspaceId: string },
 ): Promise<TaskGetRes> {
   const rows = await db.select().from(tasks).where(eq(tasks.id, args.req.task_id));
   const row = rows[0];
   if (!row) throw new TaskNotFoundError(args.req.task_id);
 
-  if (args.workspaceId) {
-    await assertProjectInWorkspace(db, { projectId: row.projectId, workspaceId: args.workspaceId });
-  }
+  await assertProjectInWorkspace(db, { projectId: row.projectId, workspaceId: args.workspaceId });
 
   const agentContext = await buildAgentContext(db, args.req.task_id);
 
@@ -1048,9 +1044,8 @@ export async function removeDependency(
   // Verify task exists and belongs to workspace before mutating.
   const preRows = await db.select().from(tasks).where(eq(tasks.id, args.fromTaskId));
   const preTask = preRows[0];
-  if (preTask) {
-    await assertProjectInWorkspace(db, { projectId: preTask.projectId, workspaceId: args.workspaceId });
-  }
+  if (!preTask) throw new TaskNotFoundError(args.fromTaskId);
+  await assertProjectInWorkspace(db, { projectId: preTask.projectId, workspaceId: args.workspaceId });
 
   await db
     .delete(taskDependencies)

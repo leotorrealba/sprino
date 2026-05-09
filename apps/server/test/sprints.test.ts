@@ -22,6 +22,7 @@ import {
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
   FIXTURE_TOKEN,
   buildTestApp,
 } from './setup.ts';
@@ -45,6 +46,7 @@ async function makeTask(title: string): Promise<string> {
   const res = await createTask(db, {
     req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return res.task.id;
 }
@@ -267,7 +269,7 @@ describe('D4-P2: closeSprint carry-over', () => {
 describe('D4-P2: updateTaskPoints', () => {
   it('sets tasks.points field', async () => {
     const taskId = await makeTask('task with points');
-    const taskRes = await getTask(db, { req: { task_id: taskId } });
+    const taskRes = await getTask(db, { req: { task_id: taskId }, workspaceId: FIXTURE_WORKSPACE_ID });
     await updateTaskPoints(db, {
       req: {
         operation_id: uuidv7(),
@@ -276,6 +278,7 @@ describe('D4-P2: updateTaskPoints', () => {
         if_match: taskRes.task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const rows = await db
       .select({ points: tasks.points })
@@ -419,7 +422,7 @@ describe('D4-P2: HTTP endpoints', () => {
   it('PATCH /tasks/:id/points → 200', async () => {
     const app = buildTestApp();
     const taskId = await makeTask('HTTP points task');
-    const taskRes = await getTask(db, { req: { task_id: taskId } });
+    const taskRes = await getTask(db, { req: { task_id: taskId }, workspaceId: FIXTURE_WORKSPACE_ID });
     const res = await app.fetch(
       new Request(`http://localhost/api/tasks/${taskId}/points`, {
         method: 'PATCH',

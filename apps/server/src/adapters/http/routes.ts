@@ -71,6 +71,7 @@ import {
 } from '../../service/attachments.ts';
 import { storage } from '../../service/attachments/instance.ts';
 import {
+  DEFAULT_WORKSPACE_ID,
   ProjectNotFoundError,
   ProjectSlugConflictError,
   createProject,
@@ -171,6 +172,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const res = await createProject(c.get('db'), {
         req,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5): read from workspace context once Task 6 lands
       });
       return c.json(res, 201);
     } catch (err) {
@@ -180,7 +182,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   api.get('/projects', async (c) => {
     try {
-      const res = await listProjects(c.get('db'));
+      const res = await listProjects(c.get('db'), { workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5): read from workspace context once Task 6 lands
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -193,7 +195,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         slug: c.req.query('slug') || undefined,
         repo_path: c.req.query('repo_path') || undefined,
       });
-      const res = await getProject(c.get('db'), { req });
+      const res = await getProject(c.get('db'), { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -205,7 +207,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const req = ProjectGetReqSchema.parse({
         project_id: c.req.param('id'),
       });
-      const res = await getProject(c.get('db'), { req });
+      const res = await getProject(c.get('db'), { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -238,7 +240,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
         offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
       });
-      const res = await listTasks(c.get('db'), { req });
+      const res = await listTasks(c.get('db'), { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -250,7 +252,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const body = await c.req.json().catch(() => ({}));
       const req = TaskCreateReqSchema.parse(body);
       const actor = c.get('actor');
-      const res = await createTask(c.get('db'), { req, actorId: actor.id });
+      const res = await createTask(c.get('db'), { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 201);
     } catch (err) {
       return errorResponse(c, err);
@@ -260,7 +262,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   api.get('/tasks/:id', async (c) => {
     try {
       const req = TaskGetReqSchema.parse({ task_id: c.req.param('id') });
-      const res = await getTask(c.get('db'), { req });
+      const res = await getTask(c.get('db'), { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -278,6 +280,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const res = await updateTaskStatus(c.get('db'), {
         req,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return c.json(res, 200);
     } catch (err) {
@@ -296,6 +299,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const res = await transitionTaskWorkflow(c.get('db'), {
         req,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return c.json(res, 200);
     } catch (err) {
@@ -311,7 +315,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         task_id: c.req.param('id'),
       });
       const actor = c.get('actor');
-      const res = await reorderTask(c.get('db'), { req, actorId: actor.id });
+      const res = await reorderTask(c.get('db'), { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -327,6 +331,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         taskId: req.task_id,
         parentTaskId: req.parent_task_id,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return c.json(res, 200);
     } catch (err) {
@@ -346,6 +351,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return c.json(res, 200);
     } catch (err) {
@@ -360,6 +366,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         fromTaskId: c.req.param('id'),
         toTaskId: c.req.param('depId'),
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return new Response(null, { status: 204 });
     } catch (err) {
@@ -500,7 +507,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       // Sprino-internal: surface source + revoked_at so the Members UI
       // can distinguish env vs db actors and render revocation status.
       // MCP `actor.list` continues to return the canonical Tessera shape.
-      const res = await listMembers(c.get('db'), { req });
+      const res = await listMembers(c.get('db'), { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return actorErrorResponse(c, err);
@@ -780,7 +787,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       const body = await c.req.json().catch(() => ({}));
       const req = UpdateTaskPointsReqSchema.parse({ ...body, task_id: c.req.param('id') });
       const actor = c.get('actor');
-      const res = await updateTaskPoints(c.get('db'), { req, actorId: actor.id });
+      const res = await updateTaskPoints(c.get('db'), { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);

@@ -72,6 +72,7 @@ import {
   heartbeatAgent,
 } from '../../service/agent-lifecycle.ts';
 import {
+  DEFAULT_WORKSPACE_ID,
   ProjectNotFoundError,
   ProjectSlugConflictError,
   createProject,
@@ -741,41 +742,41 @@ async function callTool(
   switch (name) {
     case 'sprino.project.create': {
       const req = ProjectCreateReqSchema.parse(args);
-      const res = await createProject(db, { req, actorId: actor.id });
+      const res = await createProject(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5): workspace from actor context
       return wrapToolResult(res);
     }
     case 'sprino.project.list': {
-      const res = await listProjects(db);
+      const res = await listProjects(db, { workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.project.get': {
       const req = ProjectGetReqSchema.parse(args ?? {});
-      const res = await getProject(db, { req });
+      const res = await getProject(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.create': {
       const req = TaskCreateReqSchema.parse(args);
-      const res = await createTask(db, { req, actorId: actor.id });
+      const res = await createTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.get': {
       const req = TaskGetReqSchema.parse(args);
-      const res = await getTask(db, { req });
+      const res = await getTask(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.update_status': {
       const req = TaskUpdateStatusReqSchema.parse(args);
-      const res = await updateTaskStatus(db, { req, actorId: actor.id });
+      const res = await updateTaskStatus(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.transition_workflow': {
       const req = TaskTransitionWorkflowReqSchema.parse(args);
-      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id });
+      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.reorder': {
       const req = TaskReorderReqSchema.parse(args);
-      const res = await reorderTask(db, { req, actorId: actor.id });
+      const res = await reorderTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.task.set_parent': {
@@ -784,6 +785,7 @@ async function callTool(
         taskId: req.task_id,
         parentTaskId: req.parent_task_id,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return wrapToolResult(res);
     }
@@ -793,6 +795,7 @@ async function callTool(
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return wrapToolResult(res);
     }
@@ -802,6 +805,7 @@ async function callTool(
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
+        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
       });
       return wrapToolResult({ ok: true });
     }
@@ -817,7 +821,7 @@ async function callTool(
     }
     case 'sprino.actor.list': {
       const req = ActorListReqSchema.parse(args ?? {});
-      const res = await listActors(db, { req });
+      const res = await listActors(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.actor.get': {
@@ -900,7 +904,7 @@ async function callTool(
     }
     case 'sprino.task.set_points': {
       const req = UpdateTaskPointsReqSchema.parse(args);
-      const res = await updateTaskPoints(db, { req, actorId: actor.id });
+      const res = await updateTaskPoints(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
       return wrapToolResult(res);
     }
     case 'sprino.saved_view.create': {
