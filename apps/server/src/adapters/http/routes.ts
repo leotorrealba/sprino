@@ -58,6 +58,7 @@ import {
   SprintTransitionReqSchema,
   UpdateTaskPointsReqSchema,
   SavedViewCreateReqSchema,
+  AutomationRuleCreateReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -146,6 +147,12 @@ import {
   listSavedViews,
   deleteSavedView,
 } from '../../service/query-language.ts';
+import {
+  AutomationRuleNotFoundError,
+  createAutomationRule,
+  listAutomationRules,
+  deleteAutomationRule,
+} from '../../service/automation.ts';
 import {
   IdempotencyConflictError,
   OperationExpiredError,
@@ -818,6 +825,44 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  // ── D5: Automation rules ─────────────────────────────────────────────────
+
+  api.post('/projects/:id/automation-rules', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AutomationRuleCreateReqSchema.parse({
+        ...body,
+        project_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await createAutomationRule(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/projects/:id/automation-rules', async (c) => {
+    try {
+      const res = await listAutomationRules(c.get('db'), c.req.param('id'));
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.delete('/projects/:id/automation-rules/:ruleId', async (c) => {
+    try {
+      await deleteAutomationRule(c.get('db'), {
+        ruleId: c.req.param('ruleId'),
+        projectId: c.req.param('id'),
+      });
+      return c.json({}, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   return api;
 }
 
@@ -1145,6 +1190,9 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof SavedViewNotFoundError) {
     return c.json({ error: 'saved_view_not_found', view_id: err.viewId }, 404);
+  }
+  if (err instanceof AutomationRuleNotFoundError) {
+    return c.json({ error: 'automation_rule_not_found', rule_id: err.ruleId }, 404);
   }
   console.error('Unhandled error:', err);
   return c.json({ error: 'internal_error' }, 500);

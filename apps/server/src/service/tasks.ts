@@ -71,6 +71,7 @@ import {
   recordOperation,
 } from './idempotency.ts';
 import { resolveProject } from './projects.ts';
+import { applyAutomationRules } from './automation.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -626,6 +627,15 @@ export async function updateTaskStatus(
         responseBody: response,
       });
 
+      await applyAutomationRules(tx, {
+        taskId: args.req.task_id,
+        projectId: updatedRow.projectId,
+        actorId: args.actorId,
+        triggerField: 'status',
+        newValue: args.req.status,
+        depth: 0,
+      });
+
       return response;
     });
   } catch (err) {
@@ -777,6 +787,15 @@ export async function transitionTaskWorkflow(
         actorId: args.actorId,
         requestHash,
         responseBody: response,
+      });
+
+      await applyAutomationRules(tx, {
+        taskId: args.req.task_id,
+        projectId: current.projectId,
+        actorId: args.actorId,
+        triggerField: 'status',
+        newValue: targetCol.mapsToStatus,
+        depth: 0,
       });
 
       return response;
