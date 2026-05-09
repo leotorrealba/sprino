@@ -72,6 +72,7 @@ import {
 } from './idempotency.ts';
 import { resolveProject } from './projects.ts';
 import { applyAutomationRules } from './automation.ts';
+import { assertProjectInWorkspace } from './authorization.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -361,7 +362,7 @@ export async function listRelatedTasks(
 
 export async function createTask(
   db: Db,
-  args: { req: TaskCreateReq; actorId: string },
+  args: { req: TaskCreateReq; actorId: string; workspaceId: string },
 ): Promise<TaskCreateRes> {
   const requestHash = hashRequest(args.req);
 
@@ -372,6 +373,8 @@ export async function createTask(
     project_id: args.req.project_id,
     repo_path: args.req.repo_path,
   });
+
+  await assertProjectInWorkspace(db, { projectId: project.id, workspaceId: args.workspaceId });
 
   const taskId = uuidv7();
   const eventId = uuidv7();
@@ -469,8 +472,12 @@ export async function createTask(
  */
 export async function listTasks(
   db: Db,
-  args: { req: TaskListReq },
+  args: { req: TaskListReq; workspaceId: string },
 ): Promise<TaskListRes> {
+  if (args.req.project_id) {
+    await assertProjectInWorkspace(db, { projectId: args.req.project_id, workspaceId: args.workspaceId });
+  }
+
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
 
@@ -507,11 +514,15 @@ export async function listTasks(
 
 export async function getTask(
   db: Db,
-  args: { req: TaskGetReq },
+  args: { req: TaskGetReq; workspaceId?: string },
 ): Promise<TaskGetRes> {
   const rows = await db.select().from(tasks).where(eq(tasks.id, args.req.task_id));
   const row = rows[0];
   if (!row) throw new TaskNotFoundError(args.req.task_id);
+
+  if (args.workspaceId) {
+    await assertProjectInWorkspace(db, { projectId: row.projectId, workspaceId: args.workspaceId });
+  }
 
   const agentContext = await buildAgentContext(db, args.req.task_id);
 
@@ -523,7 +534,7 @@ export async function getTask(
 
 export async function updateTaskStatus(
   db: Db,
-  args: { req: TaskUpdateStatusReq; actorId: string },
+  args: { req: TaskUpdateStatusReq; actorId: string; workspaceId: string },
 ): Promise<TaskUpdateStatusRes> {
   const requestHash = hashRequest(args.req);
 
@@ -545,6 +556,7 @@ export async function updateTaskStatus(
       const current = rows[0];
 
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }
@@ -675,7 +687,7 @@ export async function listWorkflowColumns(
 
 export async function transitionTaskWorkflow(
   db: Db,
-  args: { req: TaskTransitionWorkflowReq; actorId: string },
+  args: { req: TaskTransitionWorkflowReq; actorId: string; workspaceId: string },
 ): Promise<TaskTransitionWorkflowRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -694,6 +706,7 @@ export async function transitionTaskWorkflow(
         .for('update');
       const current = taskRows[0];
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }
@@ -809,7 +822,7 @@ export async function transitionTaskWorkflow(
 
 export async function reorderTask(
   db: Db,
-  args: { req: TaskReorderReq; actorId: string },
+  args: { req: TaskReorderReq; actorId: string; workspaceId: string },
 ): Promise<TaskReorderRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -825,6 +838,7 @@ export async function reorderTask(
         .for('update');
       const target = taskRows[0];
       if (!target) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: target.projectId, workspaceId: args.workspaceId });
       if (target.workflowColumnId !== args.req.column_id) {
         throw new TaskNotInColumnError(args.req.task_id, args.req.column_id);
       }
@@ -936,13 +950,14 @@ async function isReachableInDependencies(
 
 export async function setParent(
   db: Db,
-  args: { taskId: string; parentTaskId: string | null; actorId: string },
+  args: { taskId: string; parentTaskId: string | null; actorId: string; workspaceId: string },
 ): Promise<SetParentRes> {
   const now = new Date();
 
   const taskRows = await db.select().from(tasks).where(eq(tasks.id, args.taskId));
   const current = taskRows[0];
   if (!current) throw new TaskNotFoundError(args.taskId);
+  await assertProjectInWorkspace(db, { projectId: current.projectId, workspaceId: args.workspaceId });
 
   if (args.parentTaskId !== null) {
     const parentRows = await db.select().from(tasks).where(eq(tasks.id, args.parentTaskId));
@@ -978,7 +993,7 @@ export async function setParent(
 
 export async function addDependency(
   db: Db,
-  args: { fromTaskId: string; toTaskId: string; actorId: string },
+  args: { fromTaskId: string; toTaskId: string; actorId: string; workspaceId: string },
 ): Promise<AddDependencyRes> {
   const now = new Date();
 
@@ -991,6 +1006,7 @@ export async function addDependency(
   if (!fromTask) throw new TaskNotFoundError(args.fromTaskId);
   if (!toTask) throw new TaskNotFoundError(args.toTaskId);
   if (fromTask.projectId !== toTask.projectId) throw new CrossProjectRelationError();
+  await assertProjectInWorkspace(db, { projectId: fromTask.projectId, workspaceId: args.workspaceId });
 
   const wouldCycle = await isReachableInDependencies(db, args.toTaskId, args.fromTaskId);
   if (wouldCycle) throw new DependencyCycleDetectedError();
@@ -1025,9 +1041,16 @@ export async function addDependency(
 
 export async function removeDependency(
   db: Db,
-  args: { fromTaskId: string; toTaskId: string; actorId: string },
+  args: { fromTaskId: string; toTaskId: string; actorId: string; workspaceId: string },
 ): Promise<void> {
   const now = new Date();
+
+  // Verify task exists and belongs to workspace before mutating.
+  const preRows = await db.select().from(tasks).where(eq(tasks.id, args.fromTaskId));
+  const preTask = preRows[0];
+  if (preTask) {
+    await assertProjectInWorkspace(db, { projectId: preTask.projectId, workspaceId: args.workspaceId });
+  }
 
   await db
     .delete(taskDependencies)
@@ -1075,7 +1098,7 @@ export async function listDependencies(
 
 export async function updateTaskPoints(
   db: Db,
-  args: { req: UpdateTaskPointsReq; actorId: string },
+  args: { req: UpdateTaskPointsReq; actorId: string; workspaceId: string },
 ): Promise<UpdateTaskPointsRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -1093,6 +1116,7 @@ export async function updateTaskPoints(
         .for('update');
       const current = rows[0];
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }
