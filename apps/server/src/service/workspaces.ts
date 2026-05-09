@@ -18,6 +18,7 @@ import type {
   WorkspaceMemberAddReq,
   WorkspaceMemberListRes,
 } from '../domain/index.ts';
+import { ActorNotFoundError } from './actors.ts';
 
 // ── Errors ───────────────────────────────────────────────────────────────
 
@@ -46,6 +47,13 @@ export class WorkspaceAdminRequiredError extends Error {
   constructor(public readonly actorId: string) {
     super(`actor ${actorId} does not have workspace admin role`);
     this.name = 'WorkspaceAdminRequiredError';
+  }
+}
+
+export class WorkspaceLastAdminError extends Error {
+  constructor(public readonly workspaceId: string) {
+    super(`cannot remove the last admin from workspace ${workspaceId}`);
+    this.name = 'WorkspaceLastAdminError';
   }
 }
 
@@ -93,25 +101,36 @@ export async function createWorkspace(
   if (existing[0]) throw new WorkspaceSlugConflictError(req.slug);
 
   const id = uuidv7();
-  return await db.transaction(async (tx) => {
-    await tx.insert(workspaces).values({
-      id,
-      name: req.name,
-      slug: req.slug,
-      createdBy: actorId,
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.insert(workspaces).values({
+        id,
+        name: req.name,
+        slug: req.slug,
+        createdBy: actorId,
+      });
+      await tx.insert(workspaceMembers).values({
+        workspaceId: id,
+        actorId,
+        role: 'admin',
+      });
+      const [row] = await tx
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.id, id))
+        .limit(1);
+      return { workspace: rowToWorkspace(row!) };
     });
-    await tx.insert(workspaceMembers).values({
-      workspaceId: id,
-      actorId,
-      role: 'admin',
-    });
-    const [row] = await tx
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, id))
-      .limit(1);
-    return { workspace: rowToWorkspace(row!) };
-  });
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message.includes('unique') &&
+      err.message.toLowerCase().includes('slug')
+    ) {
+      throw new WorkspaceSlugConflictError(req.slug);
+    }
+    throw err;
+  }
 }
 
 // ── listWorkspacesForActor ─────────────────────────────────────────────────
@@ -152,7 +171,7 @@ export async function addWorkspaceMember(
     .from(actors)
     .where(eq(actors.id, req.actor_id))
     .limit(1);
-  if (!target) throw new WorkspaceMemberNotFoundError(req.actor_id);
+  if (!target) throw new ActorNotFoundError(req.actor_id);
 
   await db
     .insert(workspaceMembers)
@@ -178,6 +197,22 @@ export async function removeWorkspaceMember(
   }: { workspaceId: string; actorId: string; adminActorId: string },
 ): Promise<void> {
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
+
+  // Guard against removing the last admin when self-removing
+  if (adminActorId === actorId) {
+    const admins = await db
+      .select({ actorId: workspaceMembers.actorId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          eq(workspaceMembers.role, 'admin'),
+        ),
+      );
+    if (admins.length <= 1) {
+      throw new WorkspaceLastAdminError(workspaceId);
+    }
+  }
 
   const deleted = await db
     .delete(workspaceMembers)
@@ -219,7 +254,7 @@ export async function listWorkspaceMembers(
     members: rows.map((r): WorkspaceMember => ({
       workspace_id: r.workspaceId,
       actor_id: r.actorId,
-      role: r.role as 'admin' | 'member',
+      role: r.role,
       joined_at: r.joinedAt.toISOString(),
     })),
   };
@@ -239,13 +274,14 @@ export async function resolveWorkspaceForActor(
   const rows = await db
     .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
     .from(workspaceMembers)
-    .where(eq(workspaceMembers.actorId, actorId));
+    .where(eq(workspaceMembers.actorId, actorId))
+    .limit(3);  // only need to distinguish 0, 1, vs 2+
 
   if (rows.length === 1) {
     return {
       kind: 'resolved',
       workspaceId: rows[0]!.workspaceId,
-      role: rows[0]!.role as 'admin' | 'member',
+      role: rows[0]!.role,
     };
   }
   if (rows.length === 0) return { kind: 'none' };
@@ -278,6 +314,6 @@ export async function resolveWorkspaceById(
     workspaceId: row.id,
     name: row.name,
     slug: row.slug,
-    role: row.role as 'admin' | 'member',
+    role: row.role,
   };
 }
