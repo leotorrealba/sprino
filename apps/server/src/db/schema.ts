@@ -378,6 +378,44 @@ export const sprintTasks = pgTable(
   }),
 );
 
+export const savedViews = pgTable(
+  'saved_views',
+  {
+    id: uuid('id').primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    filters: jsonb('filters').notNull(),
+    createdBy: uuid('created_by').notNull().references(() => actors.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdx: index('saved_views_project_idx').on(t.projectId),
+  }),
+);
+
+export const automationRules = pgTable(
+  'automation_rules',
+  {
+    id: uuid('id').primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    triggerField: text('trigger_field').notNull(),
+    triggerValue: text('trigger_value'),
+    actionField: text('action_field').notNull(),
+    actionValue: text('action_value'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: uuid('created_by').notNull().references(() => actors.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    projectIdx: index('automation_rules_project_idx').on(t.projectId),
+  }),
+);
+
 // Convenience exports for service layer
 export type ActorRow = typeof actors.$inferSelect;
 export type NewActorRow = typeof actors.$inferInsert;
@@ -403,3 +441,7 @@ export type SprintRow = typeof sprints.$inferSelect;
 export type NewSprintRow = typeof sprints.$inferInsert;
 export type SprintTaskRow = typeof sprintTasks.$inferSelect;
 export type NewSprintTaskRow = typeof sprintTasks.$inferInsert;
+export type SavedViewRow = typeof savedViews.$inferSelect;
+export type NewSavedViewRow = typeof savedViews.$inferInsert;
+export type AutomationRuleRow = typeof automationRules.$inferSelect;
+export type NewAutomationRuleRow = typeof automationRules.$inferInsert;

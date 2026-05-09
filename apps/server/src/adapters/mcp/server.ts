@@ -20,7 +20,7 @@
  */
 
 import { Hono } from 'hono';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
 import type { AuthEnv } from '../../auth/middleware.ts';
@@ -53,6 +53,7 @@ import {
   ActorHeartbeatReqSchema,
   ActorRevokeTokenReqSchema,
   ActorDeactivateReqSchema,
+  SavedViewCreateReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -107,6 +108,12 @@ import {
   removeFromSprint,
   createSprint,
 } from '../../service/sprints.ts';
+import {
+  SavedViewNotFoundError,
+  createSavedView,
+  listSavedViews,
+  deleteSavedView,
+} from '../../service/query-language.ts';
 import {
   IdempotencyConflictError,
   OperationExpiredError,
@@ -577,6 +584,45 @@ const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    name: 'sprino.saved_view.create',
+    description: 'Create a project-shared saved view',
+    inputSchema: {
+      type: 'object',
+      required: ['project_id', 'name', 'filters'],
+      additionalProperties: false,
+      properties: {
+        project_id: { type: 'string', format: 'uuid' },
+        name: { type: 'string', minLength: 1, maxLength: 200 },
+        filters: { type: 'object' },
+      },
+    },
+  },
+  {
+    name: 'sprino.saved_view.list',
+    description: 'List saved views for a project',
+    inputSchema: {
+      type: 'object',
+      required: ['project_id'],
+      additionalProperties: false,
+      properties: {
+        project_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.saved_view.delete',
+    description: 'Delete a saved view',
+    inputSchema: {
+      type: 'object',
+      required: ['view_id', 'project_id'],
+      additionalProperties: false,
+      properties: {
+        view_id: { type: 'string', format: 'uuid' },
+        project_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -808,6 +854,23 @@ async function callTool(
       const res = await updateTaskPoints(db, { req, actorId: actor.id });
       return wrapToolResult(res);
     }
+    case 'sprino.saved_view.create': {
+      const req = SavedViewCreateReqSchema.parse(args);
+      const res = await createSavedView(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.saved_view.list': {
+      const projectId = z.object({ project_id: z.string().uuid() }).parse(args).project_id;
+      const res = await listSavedViews(db, projectId);
+      return wrapToolResult(res);
+    }
+    case 'sprino.saved_view.delete': {
+      const { view_id, project_id } = z
+        .object({ view_id: z.string().uuid(), project_id: z.string().uuid() })
+        .parse(args);
+      await deleteSavedView(db, { viewId: view_id, projectId: project_id });
+      return wrapToolResult({});
+    }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
   }
@@ -962,6 +1025,9 @@ function translateError(
   }
   if (err instanceof InvalidSprintTransitionError) {
     return rpcError(id, -32602, 'invalid_sprint_transition', { from: err.from, to: err.to });
+  }
+  if (err instanceof SavedViewNotFoundError) {
+    return rpcError(id, -32004, 'saved_view_not_found', { view_id: err.viewId });
   }
   console.error('Unhandled MCP error:', err);
   return rpcError(id, -32603, 'Internal error');

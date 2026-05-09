@@ -57,6 +57,7 @@ import {
   SprintListReqSchema,
   SprintTransitionReqSchema,
   UpdateTaskPointsReqSchema,
+  SavedViewCreateReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -140,6 +141,12 @@ import {
   createSprint,
 } from '../../service/sprints.ts';
 import {
+  SavedViewNotFoundError,
+  createSavedView,
+  listSavedViews,
+  deleteSavedView,
+} from '../../service/query-language.ts';
+import {
   IdempotencyConflictError,
   OperationExpiredError,
 } from '../../service/idempotency.ts';
@@ -219,6 +226,8 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         status: statusParam.length > 0 ? statusParam : undefined,
         assignee_id: c.req.query('assignee_id') ?? undefined,
         parent_task_id: c.req.query('parent_task_id') ?? undefined,
+        title_contains: c.req.query('title_contains') ?? undefined,
+        sprint_id: c.req.query('sprint_id') ?? undefined,
         limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
         offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
       });
@@ -771,6 +780,44 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  // ── D5: Saved views ──────────────────────────────────────────────────────
+
+  api.post('/projects/:id/saved-views', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = SavedViewCreateReqSchema.parse({
+        ...body,
+        project_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await createSavedView(c.get('db'), { req, actorId: actor.id });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.get('/projects/:id/saved-views', async (c) => {
+    try {
+      const res = await listSavedViews(c.get('db'), c.req.param('id'));
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  api.delete('/projects/:id/saved-views/:viewId', async (c) => {
+    try {
+      await deleteSavedView(c.get('db'), {
+        viewId: c.req.param('viewId'),
+        projectId: c.req.param('id'),
+      });
+      return c.json({}, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
   return api;
 }
 
@@ -1095,6 +1142,9 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof AttachmentTaskNotFoundError) {
     return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);
+  }
+  if (err instanceof SavedViewNotFoundError) {
+    return c.json({ error: 'saved_view_not_found', view_id: err.viewId }, 404);
   }
   console.error('Unhandled error:', err);
   return c.json({ error: 'internal_error' }, 500);

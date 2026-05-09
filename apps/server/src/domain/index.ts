@@ -280,6 +280,8 @@ export const TaskListReqSchema = z
     status: z.array(TaskStatusSchema).optional(),
     assignee_id: uuid.optional(),
     parent_task_id: uuid.optional(),
+    title_contains: z.string().max(200).optional(),
+    sprint_id: uuid.optional(),
   })
   .merge(paginationSchema(MAX_LIMITS.tasks));
 export type TaskListReq = z.infer<typeof TaskListReqSchema>;
@@ -757,3 +759,69 @@ export const UpdateTaskPointsResSchema = z.object({
   event: EventSchema,
 });
 export type UpdateTaskPointsRes = z.infer<typeof UpdateTaskPointsResSchema>;
+
+// ── D5: Search, Views, and Automation ─────────────────────────────────────
+
+export const TaskFiltersSchema = z.object({
+  status: z.array(TaskStatusSchema).optional(),
+  assignee_id: uuid.optional(),
+  parent_task_id: uuid.optional(),
+  title_contains: z.string().max(200).optional(),
+  sprint_id: uuid.optional(),
+});
+export type TaskFilters = z.infer<typeof TaskFiltersSchema>;
+
+export const SavedViewSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(100),
+  filters: TaskFiltersSchema,
+  created_by: uuid,
+  created_at: isoDateTime,
+});
+export type SavedView = z.infer<typeof SavedViewSchema>;
+
+export const SavedViewCreateReqSchema = z.object({
+  project_id: uuid,
+  name: z.string().min(1).max(100),
+  filters: TaskFiltersSchema,
+});
+export type SavedViewCreateReq = z.infer<typeof SavedViewCreateReqSchema>;
+
+export const SavedViewCreateResSchema = z.object({ saved_view: SavedViewSchema });
+export type SavedViewCreateRes = z.infer<typeof SavedViewCreateResSchema>;
+
+export const SavedViewListResSchema = z.object({ saved_views: z.array(SavedViewSchema) });
+export type SavedViewListRes = z.infer<typeof SavedViewListResSchema>;
+
+export const AutomationRuleSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(200),
+  trigger_field: z.enum(['status', 'assignee_id']),
+  trigger_value: z.string().nullable(),
+  action_value: z.string().nullable(),
+  action_field: z.enum(['status', 'assignee_id']),
+  is_active: z.boolean(),
+  created_by: uuid,
+  created_at: isoDateTime,
+});
+export type AutomationRule = z.infer<typeof AutomationRuleSchema>;
+
+export const AutomationRuleCreateReqSchema = z.object({
+  project_id: uuid,
+  name: z.string().min(1).max(200),
+  trigger_field: z.enum(['status', 'assignee_id']),
+  trigger_value: z.string().nullable().optional(),
+  action_field: z.enum(['status', 'assignee_id']),
+  action_value: z.string().nullable().optional(),
+});
+export type AutomationRuleCreateReq = z.infer<typeof AutomationRuleCreateReqSchema>;
+
+export const AutomationRuleCreateResSchema = z.object({ automation_rule: AutomationRuleSchema });
+export type AutomationRuleCreateRes = z.infer<typeof AutomationRuleCreateResSchema>;
+
+export const AutomationRuleListResSchema = z.object({
+  automation_rules: z.array(AutomationRuleSchema),
+});
+export type AutomationRuleListRes = z.infer<typeof AutomationRuleListResSchema>;
