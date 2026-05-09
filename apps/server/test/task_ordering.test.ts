@@ -243,7 +243,7 @@ describe('D2-P2: reorderTask', () => {
           after_task_id: null,
         },
         actorId: FIXTURE_ACTOR_ID,
-      workspaceId: FIXTURE_WORKSPACE_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(TaskNotInColumnError);
   });
@@ -272,7 +272,7 @@ describe('D2-P2: reorderTask', () => {
           after_task_id: taskIds[0]!,
         },
         actorId: FIXTURE_ACTOR_ID,
-      workspaceId: FIXTURE_WORKSPACE_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(TaskNotInColumnError);
   });

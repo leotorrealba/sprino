@@ -101,13 +101,14 @@ import {
   revokeToken,
   rotateToken,
 } from '../../service/actors.ts';
-import { AuthorizationForbiddenError, WorkspaceIsolationError } from '../../service/authorization.ts';
+import { assertProjectInWorkspace, AuthorizationForbiddenError, WorkspaceIsolationError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
 import {
   WorkspaceNotFoundError,
   WorkspaceSlugConflictError,
   WorkspaceMemberNotFoundError,
   WorkspaceAdminRequiredError,
+  WorkspaceLastAdminError,
   createWorkspace,
   listWorkspacesForActor,
   listWorkspaceMembers,
@@ -358,6 +359,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   ws.get('/projects/:id/workflow-columns', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       const res = await listWorkflowColumns(c.get('db'), {
         projectId: c.req.param('id'),
       });
@@ -571,6 +573,9 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
+      if (req.project_id) {
+        await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
+      }
       const res = await listEvents(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
@@ -756,6 +761,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = SprintCreateReqSchema.parse({ ...body, project_id: c.req.param('id') });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createSprint(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -770,6 +776,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         project_id: c.req.param('id'),
         status: c.req.query('status') || undefined,
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const res = await listSprints(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
@@ -781,6 +788,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     try {
       const req = SprintGetReqSchema.parse({ sprint_id: c.req.param('id') });
       const res = await getSprint(c.get('db'), { req });
+      await assertProjectInWorkspace(c.get('db'), { projectId: res.sprint.project_id, workspaceId: c.get('workspace')!.id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -791,6 +799,8 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = SprintTransitionReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res =
         req.to_status === 'active'
@@ -806,6 +816,8 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = AssignToSprintReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await assignToSprint(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -820,6 +832,8 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         sprint_id: c.req.param('id'),
         task_id: c.req.param('taskId'),
       });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       await removeFromSprint(c.get('db'), { req, actorId: actor.id });
       return c.json({ ok: true }, 200);
@@ -849,6 +863,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         ...body,
         project_id: c.req.param('id'),
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createSavedView(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -859,6 +874,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   ws.get('/projects/:id/saved-views', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       const res = await listSavedViews(c.get('db'), c.req.param('id'));
       return c.json(res, 200);
     } catch (err) {
@@ -868,6 +884,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   ws.delete('/projects/:id/saved-views/:viewId', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       await deleteSavedView(c.get('db'), {
         viewId: c.req.param('viewId'),
         projectId: c.req.param('id'),
@@ -887,6 +904,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         ...body,
         project_id: c.req.param('id'),
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createAutomationRule(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -897,6 +915,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   ws.get('/projects/:id/automation-rules', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       const res = await listAutomationRules(c.get('db'), c.req.param('id'));
       return c.json(res, 200);
     } catch (err) {
@@ -906,6 +925,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   ws.delete('/projects/:id/automation-rules/:ruleId', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       await deleteAutomationRule(c.get('db'), {
         ruleId: c.req.param('ruleId'),
         projectId: c.req.param('id'),
@@ -916,9 +936,15 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  // ── Workspace member routes ───────────────────────────────────────────────
+  api.route('/', ws);
 
-  ws.get('/workspaces/:id/members', async (c) => {
+  // ── Workspace member routes (bypass — service guards membership internally) ─
+  // These are intentionally placed AFTER ws is mounted so the auth middleware
+  // has already validated the bearer token, but they do NOT require a workspace
+  // context header. The service functions verify the caller is a member of the
+  // *requested* workspace before acting (preventing IDOR cross-workspace access).
+
+  api.get('/workspaces/:id/members', async (c) => {
     try {
       const res = await listWorkspaceMembers(c.get('db'), {
         workspaceId: c.req.param('id'),
@@ -930,7 +956,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  ws.post('/workspaces/:id/members', async (c) => {
+  api.post('/workspaces/:id/members', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = WorkspaceMemberAddReqSchema.parse(body);
@@ -945,7 +971,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  ws.delete('/workspaces/:id/members/:actorId', async (c) => {
+  api.delete('/workspaces/:id/members/:actorId', async (c) => {
     try {
       await removeWorkspaceMember(c.get('db'), {
         workspaceId: c.req.param('id'),
@@ -957,8 +983,6 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       return workspaceErrorResponse(c, err);
     }
   });
-
-  api.route('/', ws);
 
   return api;
 }
@@ -979,6 +1003,9 @@ function workspaceErrorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof WorkspaceMemberNotFoundError) {
     return c.json({ error: 'workspace_member_not_found', actor_id: err.actorId }, 404);
+  }
+  if (err instanceof WorkspaceLastAdminError) {
+    return c.json({ error: 'workspace_last_admin' }, 409);
   }
   console.error('Unhandled workspace error:', err);
   return c.json({ error: 'internal_error' }, 500);
