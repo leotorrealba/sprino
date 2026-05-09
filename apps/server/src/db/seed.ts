@@ -19,8 +19,8 @@
  *     so the audit trail stays intact.
  *
  * Out of scope:
- *   - Project seeding stays in migrate.ts. This module only owns actors
- *     + actor_tokens.
+ *   - Project seeding stays in migrate.ts. This module owns actors,
+ *     actor_tokens, and workspace membership for env actors.
  */
 
 import { and, eq, isNull, notInArray } from 'drizzle-orm';
@@ -28,9 +28,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { Db } from './client.ts';
 import { actors, actorTokens, workspaceMembers } from './schema.ts';
 import { hashToken, parseActorsEnv } from '../auth/registry.ts';
-
-/** Default workspace bootstrapped by migration 0012_workspaces.sql */
-const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
+import { DEFAULT_WORKSPACE_ID } from './constants.ts';
 
 export interface SeedResult {
   importedActors: number;

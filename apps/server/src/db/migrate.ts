@@ -18,12 +18,10 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { eq } from 'drizzle-orm';
 import { db, closeDb } from './client.ts';
-import { projects, workspaces, workspaceMembers } from './schema.ts';
+import { projects, workspaces } from './schema.ts';
 import { seedFromEnv } from './seed.ts';
+import { DEFAULT_WORKSPACE_ID } from './constants.ts';
 import type { Db } from './client.ts';
-
-/** Default workspace bootstrapped by migration 0012_workspaces.sql */
-const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 
 interface ProjectEntry {
   id: string;
@@ -129,6 +127,10 @@ async function main(): Promise<void> {
   console.log('Running migrations...');
   await migrate(db, { migrationsFolder: './src/db/migrations' });
   console.log('Migrations applied.');
+
+  // Ensure the default workspace row exists before any seed that inserts
+  // into workspace_members (which has a FK on workspaces.id).
+  await ensureDefaultWorkspace(db);
 
   const result = await seedFromEnv(db);
   console.log(

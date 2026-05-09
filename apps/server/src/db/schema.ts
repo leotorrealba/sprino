@@ -141,21 +141,15 @@ export const actorTokens = pgTable(
 
 // ── E1: Workspace tables (must come BEFORE projects — projects FK refs workspaces) ──
 
-export const workspaces = pgTable(
-  'workspaces',
-  {
-    id: uuid('id').primaryKey(),
-    name: text('name').notNull(),
-    slug: text('slug').notNull().unique(),
-    createdBy: uuid('created_by').references(() => actors.id),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    slugIdx: index('workspaces_slug_idx').on(t.slug),
-  }),
-);
+export const workspaces = pgTable('workspaces', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  createdBy: uuid('created_by').references(() => actors.id),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 export const workspaceMembers = pgTable(
   'workspace_members',
