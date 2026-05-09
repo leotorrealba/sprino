@@ -11,6 +11,9 @@ import { asc, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { projects, workflowColumns, workflowTransitions } from '../db/schema.ts';
+
+/** Default workspace bootstrapped by migration 0012_workspaces.sql */
+const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 import type { ProjectRow } from '../db/schema.ts';
 import type {
   Project,
@@ -216,6 +219,9 @@ export async function createProject(
         slug: req.slug,
         displayName: req.display_name,
         repoPath: req.repo_path ?? null,
+        // TODO(E1-P4): accept workspace_id from the request once workspace
+        // routing is wired. For now all projects land in the default workspace.
+        workspaceId: DEFAULT_WORKSPACE_ID,
       });
 
       // Seed the four default workflow columns for this new project.

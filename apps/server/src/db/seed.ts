@@ -26,8 +26,11 @@
 import { and, eq, isNull, notInArray } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from './client.ts';
-import { actors, actorTokens } from './schema.ts';
+import { actors, actorTokens, workspaceMembers } from './schema.ts';
 import { hashToken, parseActorsEnv } from '../auth/registry.ts';
+
+/** Default workspace bootstrapped by migration 0012_workspaces.sql */
+const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 
 export interface SeedResult {
   importedActors: number;
@@ -79,6 +82,18 @@ export async function seedFromEnv(
         },
       });
     importedActors += 1;
+
+    // Ensure each env actor is a member of the default workspace. The
+    // migration backfills existing rows, but env actors registered after
+    // migration runs also need this membership.
+    await db
+      .insert(workspaceMembers)
+      .values({
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        actorId: e.id,
+        role: e.role === 'admin' ? 'admin' : 'member',
+      })
+      .onConflictDoNothing();
 
     const tokenHash = hashToken(e.token);
 

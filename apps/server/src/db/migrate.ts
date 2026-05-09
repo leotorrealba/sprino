@@ -18,9 +18,12 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { eq } from 'drizzle-orm';
 import { db, closeDb } from './client.ts';
-import { projects } from './schema.ts';
+import { projects, workspaces, workspaceMembers } from './schema.ts';
 import { seedFromEnv } from './seed.ts';
 import type { Db } from './client.ts';
+
+/** Default workspace bootstrapped by migration 0012_workspaces.sql */
+const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 
 interface ProjectEntry {
   id: string;
@@ -61,6 +64,7 @@ async function upsertSeedProject(
       slug: entry.slug,
       displayName: entry.display_name,
       repoPath: entry.repo_path ?? null,
+      workspaceId: DEFAULT_WORKSPACE_ID,
     });
     return;
   }
@@ -75,10 +79,29 @@ async function upsertSeedProject(
     .where(eq(projects.id, row.id));
 }
 
+/**
+ * Ensure the default workspace row exists (idempotent). Safe to call on every
+ * boot — the migration already inserts it, but this covers the dev path where
+ * migrate.ts is run against a fresh DB that has not yet had the migration run.
+ */
+async function ensureDefaultWorkspace(db: Db): Promise<void> {
+  await db
+    .insert(workspaces)
+    .values({
+      id: DEFAULT_WORKSPACE_ID,
+      name: 'Default',
+      slug: 'default',
+      createdBy: null,
+    })
+    .onConflictDoNothing();
+}
+
 export async function seedProjects(
   db: Db,
   env: ProjectSeedEnv = process.env,
 ): Promise<void> {
+  await ensureDefaultWorkspace(db);
+
   const projectsJson = env.SPRINO_PROJECTS_JSON;
   const projectId = env.SPRINO_DEFAULT_PROJECT_ID;
   const projectSlug = env.SPRINO_DEFAULT_PROJECT_SLUG;

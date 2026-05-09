@@ -33,6 +33,7 @@ import {
   FIXTURE_PROJECT_ID,
   FIXTURE_TASK_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
   seedDbActor,
   seedFixtureTask,
@@ -487,6 +488,7 @@ describe('Tessera v0.0.2 project scoping', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
   }
 
@@ -1965,6 +1967,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const expectedRes = readFixture('project-list-happy.res.json') as {
@@ -2005,6 +2008,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const req = readFixture(

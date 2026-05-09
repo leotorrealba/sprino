@@ -139,6 +139,45 @@ export const actorTokens = pgTable(
   }),
 );
 
+// ── E1: Workspace tables (must come BEFORE projects — projects FK refs workspaces) ──
+
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name').notNull(),
+    slug: text('slug').notNull().unique(),
+    createdBy: uuid('created_by').references(() => actors.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    slugIdx: index('workspaces_slug_idx').on(t.slug),
+  }),
+);
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => actors.id, { onDelete: 'cascade' }),
+    role: actorRoleEnum('role').notNull().default('member'),
+    joinedAt: timestamp('joined_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspaceId, t.actorId] }),
+    actorIdx: index('workspace_members_actor_idx').on(t.actorId),
+    workspaceIdx: index('workspace_members_workspace_idx').on(t.workspaceId),
+  }),
+);
+
 export const projects = pgTable(
   'projects',
   {
@@ -146,6 +185,9 @@ export const projects = pgTable(
     slug: text('slug').notNull().unique(),
     displayName: text('display_name').notNull(),
     repoPath: text('repo_path'),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -153,6 +195,7 @@ export const projects = pgTable(
   (t) => ({
     slugIdx: index('projects_slug_idx').on(t.slug),
     repoPathIdx: index('projects_repo_path_idx').on(t.repoPath),
+    workspaceIdx: index('projects_workspace_idx').on(t.workspaceId),
   }),
 );
 
@@ -445,3 +488,7 @@ export type SavedViewRow = typeof savedViews.$inferSelect;
 export type NewSavedViewRow = typeof savedViews.$inferInsert;
 export type AutomationRuleRow = typeof automationRules.$inferSelect;
 export type NewAutomationRuleRow = typeof automationRules.$inferInsert;
+export type WorkspaceRow = typeof workspaces.$inferSelect;
+export type NewWorkspaceRow = typeof workspaces.$inferInsert;
+export type WorkspaceMemberRow = typeof workspaceMembers.$inferSelect;
+export type NewWorkspaceMemberRow = typeof workspaceMembers.$inferInsert;

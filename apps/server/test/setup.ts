@@ -31,7 +31,7 @@ import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
 import { tokenAuth } from '../src/auth/middleware.ts';
 import type { AuthEnv } from '../src/auth/middleware.ts';
 import { closeDb, db } from '../src/db/client.ts';
-import { actors, actorTokens, projects, tasks } from '../src/db/schema.ts';
+import { actors, actorTokens, projects, tasks, workspaces, workspaceMembers } from '../src/db/schema.ts';
 import { seedFromEnv } from '../src/db/seed.ts';
 import { buildHttpRoutes } from '../src/adapters/http/routes.ts';
 import { sseHandler } from '../src/adapters/http/sse.ts';
@@ -42,6 +42,7 @@ import { hashToken } from '../src/auth/registry.ts';
 export const FIXTURE_ACTOR_ID = '018c3e7a-0001-7000-8000-000000000001';
 export const FIXTURE_PROJECT_ID = '018c3e7a-0002-7000-8000-000000000001';
 export const FIXTURE_PROJECT_SLUG = 'sprino';
+export const FIXTURE_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 export const FIXTURE_TOKEN = 'test-leo-token';
 export const FIXTURE_AGENT_ID = '018c3e7a-0001-7000-8000-0000000000a1';
 export const FIXTURE_AGENT_TOKEN = 'test-agent-token';
@@ -79,8 +80,17 @@ export async function resetDb(): Promise<void> {
   // listed explicitly so its sequence resets cleanly even if FK CASCADE
   // ordering differs across Postgres versions.
   await db.execute(
-    sql`TRUNCATE TABLE attachments, events, operations, tasks, sprints, sprint_tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE attachments, events, operations, tasks, sprints, sprint_tasks, saved_views, automation_rules, task_dependencies, workflow_transitions, workflow_columns, projects, workspace_members, workspaces, actor_tokens, actors RESTART IDENTITY CASCADE`,
   );
+
+  // Ensure the default workspace exists before seeding actors/projects.
+  // seedFromEnv will add actors as workspace members after this.
+  await db.insert(workspaces).values({
+    id: FIXTURE_WORKSPACE_ID,
+    name: 'Default',
+    slug: 'default',
+    createdBy: null,
+  });
 
   // Re-import env actors (FIXTURE_ACTOR_ID + agent) into actors +
   // actor_tokens with source='env'. This replaces the bespoke INSERT
@@ -93,6 +103,7 @@ export async function resetDb(): Promise<void> {
     slug: FIXTURE_PROJECT_SLUG,
     displayName: 'Sprino',
     repoPath: null,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   await seedDefaultWorkflowColumns(db, FIXTURE_PROJECT_ID);
 }

@@ -9,6 +9,7 @@ import { projects } from '../src/db/schema.ts';
 import {
   FIXTURE_PROJECT_ID,
   FIXTURE_PROJECT_SLUG,
+  FIXTURE_WORKSPACE_ID,
 } from './setup.ts';
 
 describe('project seed merge strategy', () => {
@@ -61,6 +62,7 @@ describe('project seed merge strategy', () => {
       slug: 'sprino-shadow',
       displayName: 'Shadow',
       repoPath: null,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     await expect(
