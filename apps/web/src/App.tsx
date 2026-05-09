@@ -6,6 +6,8 @@ import { BoardFilters, type BoardFilterState } from './components/BoardFilters';
 import { Members } from './components/Members';
 import { SprintBoard } from './components/SprintBoard';
 import { TaskWorkflowBoard } from './components/TaskWorkflowBoard';
+import { TaskSearchBar } from './components/TaskSearchBar';
+import type { TaskFilters } from '@sprino/protocol-types';
 import { uuidv7 } from './lib/uuid';
 
 type LoadState = 'idle' | 'loading' | 'error';
@@ -36,7 +38,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [view, setView] = useState<View>('tasks');
-  const [filters, setFilters] = useState<BoardFilterState>({ statuses: [], assigneeId: null });
+  const [filters, setFilters] = useState<TaskFilters>({});
   const [members, setMembers] = useState<Actor[]>([]);
   const [load, setLoad] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -97,10 +99,12 @@ export function App() {
     setError(null);
     try {
       const params = new URLSearchParams({ project_id: selectedProjectId });
-      if (filters.statuses.length > 0) {
-        for (const s of filters.statuses) params.append('status', s);
+      if (filters.status && filters.status.length > 0) {
+        for (const s of filters.status) params.append('status', s);
       }
-      if (filters.assigneeId) params.set('assignee_id', filters.assigneeId);
+      if (filters.assignee_id) params.set('assignee_id', filters.assignee_id);
+      if (filters.title_contains) params.set('title_contains', filters.title_contains);
+      if (filters.sprint_id) params.set('sprint_id', filters.sprint_id);
 
       const r = await fetchAuth(`/api/tasks?${params.toString()}`);
       if (!r.ok) throw new Error(`tasks failed: ${r.status}`);
@@ -131,6 +135,33 @@ export function App() {
       .then((j: { actors: Actor[] }) => setMembers(j.actors))
       .catch(() => setMembers([]));
   }, [fetchAuth, token, selectedProjectId]);
+
+  // Restore filter state from URL params on mount (shareable links).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const statusValues = params.getAll('status') as TaskFilters['status'];
+    const restored: TaskFilters = {};
+    if (statusValues && statusValues.length > 0) restored.status = statusValues;
+    const assignee_id = params.get('assignee_id');
+    if (assignee_id) restored.assignee_id = assignee_id;
+    const title_contains = params.get('title_contains');
+    if (title_contains) restored.title_contains = title_contains;
+    const sprint_id = params.get('sprint_id');
+    if (sprint_id) restored.sprint_id = sprint_id;
+    if (Object.keys(restored).length > 0) setFilters(restored);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Push filter state to URL params (shareable links).
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (filters.status?.length) for (const s of filters.status) params.append('status', s);
+    if (filters.assignee_id) params.set('assignee_id', filters.assignee_id);
+    if (filters.title_contains) params.set('title_contains', filters.title_contains);
+    if (filters.sprint_id) params.set('sprint_id', filters.sprint_id);
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, [filters]);
 
   const createTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -402,14 +433,25 @@ export function App() {
             <>
               <BoardFilters
                 members={members}
-                filters={filters}
-                onChange={(f) => { setFilters(f); }}
+                filters={{
+                  statuses: filters.status ?? [],
+                  assigneeId: filters.assignee_id ?? null,
+                }}
+                onChange={(f) => {
+                  setFilters({
+                    status: f.statuses.length > 0 ? f.statuses : undefined,
+                    assignee_id: f.assigneeId ?? undefined,
+                  });
+                }}
               />
               <TaskWorkflowBoard
                 projectId={selectedProjectId}
                 token={token}
                 tasks={tasks}
-                filters={filters}
+                filters={{
+                  statuses: filters.status ?? [],
+                  assigneeId: filters.assignee_id ?? null,
+                }}
                 onTaskUpdated={refresh}
               />
             </>
@@ -428,6 +470,16 @@ export function App() {
             )}
           </div>
         </div>
+
+        {selectedProjectId && (
+          <TaskSearchBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            projectId={selectedProjectId}
+            token={token}
+            members={members}
+          />
+        )}
 
         <form
           onSubmit={createTask}

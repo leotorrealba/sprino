@@ -30,10 +30,10 @@
  *  └──────────────────┘
  */
 
-import { and, desc, eq, asc, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, asc, inArray, sql, ilike } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { events, taskDependencies, tasks, workflowColumns, workflowTransitions } from '../db/schema.ts';
+import { events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
 import type { TaskRow, EventRow } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
@@ -71,6 +71,7 @@ import {
   recordOperation,
 } from './idempotency.ts';
 import { resolveProject } from './projects.ts';
+import { applyAutomationRules } from './automation.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -483,6 +484,16 @@ export async function listTasks(
   if (args.req.parent_task_id) {
     conditions.push(eq(tasks.parentTaskId, args.req.parent_task_id));
   }
+  if (args.req.title_contains) {
+    conditions.push(ilike(tasks.title, `%${args.req.title_contains}%`));
+  }
+  if (args.req.sprint_id) {
+    const sprintTaskIds = db
+      .select({ taskId: sprintTasks.taskId })
+      .from(sprintTasks)
+      .where(eq(sprintTasks.sprintId, args.req.sprint_id));
+    conditions.push(inArray(tasks.id, sprintTaskIds));
+  }
 
   const rows = await db
     .select()
@@ -614,6 +625,15 @@ export async function updateTaskStatus(
         actorId: args.actorId,
         requestHash,
         responseBody: response,
+      });
+
+      await applyAutomationRules(tx, {
+        taskId: args.req.task_id,
+        projectId: updatedRow.projectId,
+        actorId: args.actorId,
+        triggerField: 'status',
+        newValue: args.req.status,
+        depth: 0,
       });
 
       return response;
@@ -767,6 +787,15 @@ export async function transitionTaskWorkflow(
         actorId: args.actorId,
         requestHash,
         responseBody: response,
+      });
+
+      await applyAutomationRules(tx, {
+        taskId: args.req.task_id,
+        projectId: current.projectId,
+        actorId: args.actorId,
+        triggerField: 'status',
+        newValue: targetCol.mapsToStatus,
+        depth: 0,
       });
 
       return response;

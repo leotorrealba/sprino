@@ -285,4 +285,25 @@ export const AttachmentListResSchema = z.object({
 });
 export type AttachmentListRes = z.infer<typeof AttachmentListResSchema>;
 
+// ── D5: Search and Saved Views ────────────────────────────────────────────────
+
+export const TaskFiltersSchema = z.object({
+  status: z.array(TaskStatusSchema).optional(),
+  assignee_id: uuid.optional(),
+  parent_task_id: uuid.optional(),
+  title_contains: z.string().max(200).optional(),
+  sprint_id: uuid.optional(),
+});
+export type TaskFilters = z.infer<typeof TaskFiltersSchema>;
+
+export const SavedViewSchema = z.object({
+  id: uuid,
+  project_id: uuid,
+  name: z.string().min(1).max(100),
+  filters: TaskFiltersSchema,
+  created_by: uuid,
+  created_at: isoDateTime,
+});
+export type SavedView = z.infer<typeof SavedViewSchema>;
+
 export const PROTOCOL_VERSION = 'tessera/v0.1.5';
