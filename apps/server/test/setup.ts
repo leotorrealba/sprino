@@ -134,7 +134,27 @@ export async function seedDbActor(args: {
     tokenHash: hashToken(token),
     source: 'db',
   });
+  await db.insert(workspaceMembers).values({
+    workspaceId: FIXTURE_WORKSPACE_ID,
+    actorId,
+    role: 'member',
+  }).onConflictDoNothing();
   return { actorId, token };
+}
+
+export async function seedWorkspace(args: {
+  id?: string;
+  name?: string;
+  slug?: string;
+}): Promise<string> {
+  const id = args.id ?? uuidv7();
+  await db.insert(workspaces).values({
+    id,
+    name: args.name ?? 'Test Workspace',
+    slug: args.slug ?? `ws-${id.slice(0, 8)}`,
+    createdBy: null,
+  });
+  return id;
 }
 
 export async function seedFixtureTask(
