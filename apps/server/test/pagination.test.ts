@@ -19,6 +19,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 import { createTask } from '../src/service/tasks.ts';
@@ -91,6 +92,7 @@ describe('Phase 6B — tasks.list pagination contract', () => {
           title: `pagination task ${i}`,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       });
     }
   }

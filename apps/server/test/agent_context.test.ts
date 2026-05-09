@@ -24,6 +24,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -50,6 +51,7 @@ async function seedTaskWithManyEvents(
       description: 'x'.repeat(200),
     },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   const taskId = created.task.id;
 
@@ -67,6 +69,7 @@ async function seedTaskWithManyEvents(
         notes: `update #${i + 1} — ${'noise '.repeat(20)}`,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     version = res.task.version;
   }
@@ -82,6 +85,7 @@ describe('agent_context: small task fits without truncation', () => {
         title: 'tiny',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const app = buildTestApp();
@@ -114,6 +118,7 @@ describe('agent_context: large event log triggers truncation', () => {
         title: 'bloat target',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const taskId = created.task.id;
     let version = created.task.version;
@@ -130,6 +135,7 @@ describe('agent_context: large event log triggers truncation', () => {
           notes: heavy,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       });
       version = res.task.version;
     }
@@ -237,6 +243,7 @@ describe('GET /api/tasks/:id/related_tasks: stub returns empty', () => {
         title: 'rel',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const app = buildTestApp();
     const res = await getJson<{

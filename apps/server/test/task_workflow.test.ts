@@ -18,6 +18,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -50,6 +51,7 @@ describe('D1-P1: workflow state persistence', () => {
         title: 'Workflow column test task',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const cols = await db
@@ -72,6 +74,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         title: 'Transition test task',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     return res.task;
   }
@@ -100,6 +103,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(res.task.workflow_column_id).toBe(inProgress.id);
@@ -123,6 +127,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(WorkflowTransitionForbiddenError);
   });
@@ -138,6 +143,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(WorkflowColumnNotFoundError);
   });
@@ -156,6 +162,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version + 99,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(VersionMismatchError);
   });
@@ -169,10 +176,12 @@ describe('D1-P2: transitionTaskWorkflow', () => {
     const res1 = await transitionTaskWorkflow(db, {
       req: { operation_id: opId, task_id: task.id, to_column_id: inProgress.id, if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const res2 = await transitionTaskWorkflow(db, {
       req: { operation_id: opId, task_id: task.id, to_column_id: inProgress.id, if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(res1.task.id).toBe(res2.task.id);
@@ -199,6 +208,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.task.workflow_column_id).toBe(done.id);
   });

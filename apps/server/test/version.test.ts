@@ -25,6 +25,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -36,6 +37,7 @@ async function newTask(): Promise<{ taskId: string; version: number }> {
       title: 'version test target',
     },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return { taskId: res.task.id, version: res.task.version };
 }
@@ -209,6 +211,7 @@ describe('task.update_status: version + if_match (service)', () => {
           if_match: 0,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(VersionMismatchError);
   });

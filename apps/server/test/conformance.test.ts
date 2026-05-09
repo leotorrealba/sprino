@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { actors, projects } from '../src/db/schema.ts';
+import { actors, projects, workspaceMembers } from '../src/db/schema.ts';
 import {
   ActorRegisterReqSchema,
   type ActorRegisterReq,
@@ -2115,6 +2115,12 @@ describe('Tessera B6 — fixture gap coverage', () => {
           agentRuntime: null,
           parentActorId: null,
           source: 'db',
+        }).onConflictDoNothing();
+        // Also add to the fixture workspace so listMembers (workspace-scoped) returns them.
+        await db.insert(workspaceMembers).values({
+          workspaceId: FIXTURE_WORKSPACE_ID,
+          actorId: fixtureActor.id,
+          role: 'member',
         }).onConflictDoNothing();
       }
     }

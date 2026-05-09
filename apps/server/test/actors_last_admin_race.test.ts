@@ -8,12 +8,12 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { actors, actorTokens } from '../src/db/schema.ts';
+import { actors, actorTokens, workspaces } from '../src/db/schema.ts';
 import {
   LastAdminProtectedError,
   revokeToken,
 } from '../src/service/actors.ts';
-import { seedDbActor } from './setup.ts';
+import { seedDbActor, FIXTURE_WORKSPACE_ID } from './setup.ts';
 
 async function setupTwoHumanAdmins(): Promise<{ a: string; b: string }> {
   await db.execute(sql`DELETE FROM actor_tokens WHERE source = 'env'`);
@@ -76,8 +76,15 @@ describe('last-admin revoke race', () => {
   it('stays stable across repeated runs', async () => {
     for (let i = 0; i < 12; i += 1) {
       await db.execute(
-        sql`TRUNCATE TABLE events, operations, tasks, projects, actor_tokens, actors RESTART IDENTITY CASCADE`,
+        sql`TRUNCATE TABLE events, operations, tasks, projects, workspace_members, workspaces, actor_tokens, actors RESTART IDENTITY CASCADE`,
       );
+      // Re-insert fixture workspace so seedDbActor (which inserts workspace_members) can succeed.
+      await db.insert(workspaces).values({
+        id: FIXTURE_WORKSPACE_ID,
+        name: 'Default',
+        slug: 'default',
+        createdBy: null,
+      });
       const { a, b } = await setupTwoHumanAdmins();
       const results = await Promise.allSettled([
         revokeToken(db, {

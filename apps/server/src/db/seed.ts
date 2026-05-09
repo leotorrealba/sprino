@@ -89,7 +89,7 @@ export async function seedFromEnv(
       .values({
         workspaceId: DEFAULT_WORKSPACE_ID,
         actorId: e.id,
-        role: e.role === 'admin' ? 'admin' : 'member',
+        role: (e.role ?? 'admin') === 'admin' ? 'admin' : 'member',
       })
       .onConflictDoNothing();
 

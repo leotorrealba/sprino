@@ -46,6 +46,7 @@ import { listEvents } from '../src/service/events.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
 } from './setup.ts';
 
 async function seedAgent(id: string, displayName: string): Promise<void> {
@@ -66,6 +67,7 @@ async function createOneTask(): Promise<{ id: string; version: number }> {
       title: 'concurrency stress target',
     },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return { id: res.task.id, version: res.task.version };
 }
@@ -102,6 +104,7 @@ describe('concurrency: 4 actors, 4 different target statuses', () => {
             if_match: 1,
           },
           actorId,
+          workspaceId: FIXTURE_WORKSPACE_ID,
         }),
       ),
     );

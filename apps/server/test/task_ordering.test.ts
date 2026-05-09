@@ -18,6 +18,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -46,6 +47,7 @@ describe('D2-P1: createTask rank assignment', () => {
     const res = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank test A' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.task.rank).toBeGreaterThanOrEqual(1);
   });
@@ -54,10 +56,12 @@ describe('D2-P1: createTask rank assignment', () => {
     const res1 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank append 1' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const res2 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank append 2' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res2.task.rank).toBeGreaterThan(res1.task.rank);
   });
@@ -70,17 +74,20 @@ describe('D2-P1: listTasks rank order', () => {
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank order 1' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank order 2' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'rank order 3' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
-    const { tasks } = await listTasks(db, { req: { project_id: FIXTURE_PROJECT_ID } });
+    const { tasks } = await listTasks(db, { req: { project_id: FIXTURE_PROJECT_ID }, workspaceId: FIXTURE_WORKSPACE_ID });
     const ranks = tasks.map((t) => t.rank);
     const sorted = [...ranks].sort((a, b) => a - b);
     expect(ranks).toEqual(sorted);
@@ -94,6 +101,7 @@ describe('D2-P1: transitionTaskWorkflow rank in new column', () => {
     const res = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'transition rank test' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const task = res.task;
 
@@ -106,6 +114,7 @@ describe('D2-P1: transitionTaskWorkflow rank in new column', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(transitioned.task.rank).toBeGreaterThanOrEqual(1);
@@ -121,14 +130,17 @@ describe('D2-P2: reorderTask', () => {
     const t1 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'reorder A' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const t2 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'reorder B' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const t3 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'reorder C' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     return {
       taskIds: [t1.task.id, t2.task.id, t3.task.id],
@@ -148,6 +160,7 @@ describe('D2-P2: reorderTask', () => {
         after_task_id: null,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const t3 = ordered.find((t) => t.id === t3id)!;
@@ -168,6 +181,7 @@ describe('D2-P2: reorderTask', () => {
         after_task_id: t1id!,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const ids = ordered.map((t) => t.id);
@@ -190,6 +204,7 @@ describe('D2-P2: reorderTask', () => {
         after_task_id: null,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const ranks = ordered.map((t) => t.rank).sort((a, b) => a - b);
@@ -204,10 +219,12 @@ describe('D2-P2: reorderTask', () => {
     const res1 = await reorderTask(db, {
       req: { operation_id: opId, task_id: t1id!, column_id: columnId, after_task_id: null },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const res2 = await reorderTask(db, {
       req: { operation_id: opId, task_id: t1id!, column_id: columnId, after_task_id: null },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(res2.tasks.map((t) => t.id)).toEqual(res1.tasks.map((t) => t.id));
@@ -226,6 +243,7 @@ describe('D2-P2: reorderTask', () => {
           after_task_id: null,
         },
         actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(TaskNotInColumnError);
   });
@@ -242,6 +260,7 @@ describe('D2-P2: reorderTask', () => {
         if_match: 1,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     await expect(
@@ -253,6 +272,7 @@ describe('D2-P2: reorderTask', () => {
           after_task_id: taskIds[0]!,
         },
         actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(TaskNotInColumnError);
   });
@@ -266,6 +286,7 @@ describe('D2-P2: listTasks filters', () => {
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'filter status test' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const res = await app.request(
@@ -287,6 +308,7 @@ describe('D2-P2: listTasks filters', () => {
         assignee_id: FIXTURE_ACTOR_ID,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const res = await app.request(
@@ -309,10 +331,12 @@ describe('D2-P2: POST /api/tasks/:id/reorder HTTP', () => {
     const t1 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http reorder 1' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const t2 = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http reorder 2' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const res = await app.request(`/api/tasks/${t2.task.id}/reorder`, {
@@ -341,6 +365,7 @@ describe('D2-P2: POST /api/tasks/:id/reorder HTTP', () => {
     const t = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http reorder wrong col' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const res = await app.request(`/api/tasks/${t.task.id}/reorder`, {

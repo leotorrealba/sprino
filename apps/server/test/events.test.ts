@@ -27,6 +27,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -50,6 +51,7 @@ async function createOneTask(
       title,
     },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return { id: res.task.id, version: res.task.version };
 }
@@ -83,6 +85,7 @@ describe('events: 4-actor concurrent updateTaskStatus race', () => {
             if_match: 1,
           },
           actorId,
+          workspaceId: FIXTURE_WORKSPACE_ID,
         }),
       ),
     );
@@ -126,6 +129,7 @@ describe('events: listEvents service', () => {
         if_match: 1,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const { events: list } = await listEvents(db, {
