@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Actor, Project, Task, TaskStatus } from '@sprino/protocol-types';
-import type { Workspace } from '@sprino/protocol-types';
+import type { Actor, Project, Task, TaskStatus, Workspace } from '@sprino/protocol-types';
 import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
@@ -106,6 +105,7 @@ export function App() {
       setSelectedProjectId('');
       setSelectedTaskId(null);
     },
+    // all deps are stable React state-setter refs
     [],
   );
 

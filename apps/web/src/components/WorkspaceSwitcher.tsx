@@ -13,14 +13,19 @@ export function WorkspaceSwitcher({ workspaceId, onWorkspaceChange, token }: Pro
 
   useEffect(() => {
     if (!token) return;
+    const controller = new AbortController();
     fetch('/api/workspaces', {
       headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (j?.workspaces) setWorkspaces(j.workspaces);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if ((e as Error)?.name !== 'AbortError') {}
+      });
+    return () => controller.abort();
   }, [token]);
 
   if (workspaces.length <= 1) return null;
