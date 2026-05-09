@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { workspaceMembers } from '../src/db/schema.ts';
-import { and, eq } from 'drizzle-orm';
+import { actors, workspaceMembers } from '../src/db/schema.ts';
+import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import {
   FIXTURE_ACTOR_ID,
@@ -60,6 +60,7 @@ describe('workspace management', () => {
     const r = await app.fetch(
       new Request('http://test/api/workspaces', { headers: auth(FIXTURE_TOKEN) }),
     );
+    expect(r.status).toBe(200);
     const listBody = await r.json() as { workspaces: { id: string }[] };
     expect(listBody.workspaces.map((w) => w.id)).toContain(FIXTURE_WORKSPACE_ID);
     expect(listBody.workspaces.map((w) => w.id)).not.toContain(otherId);
@@ -69,7 +70,15 @@ describe('workspace management', () => {
 describe('workspace membership management', () => {
   it('admin can add a member → member appears in list', async () => {
     const app = buildTestApp();
-    const { actorId } = await seedDbActor({ displayName: 'New Guy', kind: 'human' });
+    // Insert actor directly — NOT via seedDbActor, to avoid auto-enrollment in FIXTURE_WORKSPACE_ID
+    const actorId = uuidv7();
+    await db.insert(actors).values({
+      id: actorId,
+      kind: 'human',
+      role: 'admin',
+      displayName: 'New Guy',
+      source: 'db',
+    });
 
     const addR = await app.fetch(
       new Request(`http://test/api/workspaces/${FIXTURE_WORKSPACE_ID}/members`, {
@@ -109,6 +118,14 @@ describe('workspace membership management', () => {
       }),
     );
     expect(delR.status).toBe(204);
+
+    const afterR = await app.fetch(
+      new Request(`http://test/api/workspaces/${FIXTURE_WORKSPACE_ID}/members`, {
+        headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+      }),
+    );
+    const afterBody = await afterR.json() as { members: { actor_id: string }[] };
+    expect(afterBody.members.map((m) => m.actor_id)).not.toContain(actorId);
   });
 
   it('non-admin workspace member cannot add members → 403', async () => {
@@ -119,13 +136,7 @@ describe('workspace membership management', () => {
       role: 'member',
     });
 
-    // Force the seeded actor to have 'member' workspace role
-    const [memberRow] = await db
-      .select({ actorId: workspaceMembers.actorId })
-      .from(workspaceMembers)
-      .where(eq(workspaceMembers.workspaceId, FIXTURE_WORKSPACE_ID))
-      .orderBy(workspaceMembers.actorId);
-    // The last inserted actor should have role='member' from seedDbActor
+    // The seeded actor has role='member' from seedDbActor
     // Try to add a random actor — should be forbidden
     const r = await app.fetch(
       new Request(`http://test/api/workspaces/${FIXTURE_WORKSPACE_ID}/members`, {

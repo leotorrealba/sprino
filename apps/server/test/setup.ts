@@ -137,7 +137,7 @@ export async function seedDbActor(args: {
   await db.insert(workspaceMembers).values({
     workspaceId: FIXTURE_WORKSPACE_ID,
     actorId,
-    role: 'member',
+    role: args.role ?? 'member',
   }).onConflictDoNothing();
   return { actorId, token };
 }
