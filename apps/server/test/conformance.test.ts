@@ -1824,6 +1824,7 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
     expect(eventListResp.status).toBe(200);
     const eventListJson = (await eventListResp.json()) as {
       events: Array<{
+        workspace_id: string;
         actor: Record<string, unknown>;
         task: Record<string, unknown>;
       }>;
@@ -1832,6 +1833,7 @@ describe('Tessera v0.1.2 conformance — actor lifecycle', () => {
       (event) => event.task.id === taskId,
     );
     expect(createdEvent).toBeDefined();
+    expect(createdEvent!.workspace_id).toBe(FIXTURE_WORKSPACE_ID);
     expect(createdEvent!.actor.id).toBe(FIXTURE_AGENT_ID);
     expectNoAgentLifecycleFields(createdEvent!.actor);
     expectNoAgentLifecycleFields(createdEvent!.task);
