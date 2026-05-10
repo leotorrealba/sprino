@@ -141,6 +141,38 @@ describe('D3-P2: setParent guards', () => {
   });
 });
 
+describe('EC-2: setParent descendant depth check', () => {
+  it('setParent throws HierarchyDepthExceededError when moving a task with children would exceed max depth', async () => {
+    const p1 = await makeTask('EC-2 P1');
+    const p2 = await makeTask('EC-2 P2');
+    const p3 = await makeTask('EC-2 P3');
+    await setParent(db, { taskId: p2, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+    await setParent(db, { taskId: p3, parentTaskId: p2, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    const a = await makeTask('EC-2 A');
+    const b = await makeTask('EC-2 B');
+    await setParent(db, { taskId: b, parentTaskId: a, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(
+      setParent(db, { taskId: a, parentTaskId: p2, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
+    ).rejects.toBeInstanceOf(HierarchyDepthExceededError);
+  });
+
+  it('setParent succeeds when tree fits within max depth after considering descendants', async () => {
+    const p1 = await makeTask('EC-2 fit P1');
+    const p2 = await makeTask('EC-2 fit P2');
+    await setParent(db, { taskId: p2, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    const a = await makeTask('EC-2 fit A');
+    const b = await makeTask('EC-2 fit B');
+    await setParent(db, { taskId: b, parentTaskId: a, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(
+      setParent(db, { taskId: a, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
+    ).resolves.not.toThrow();
+  });
+});
+
 describe('D3-P2: addDependency guards', () => {
   it('throws DependencyCycleDetectedError when cycle would be created', async () => {
     const aId = await makeTask('dep cycle A');
@@ -232,7 +264,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
 });
 
 describe('D3-P2: removeDependency', () => {
-  it('removes the dependency row and does NOT auto-change status', async () => {
+  it('removes the dependency row and auto-reverts status to todo when last blocker is removed', async () => {
     const fromId = await makeTask('remove from');
     const toId = await makeTask('remove to');
     await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
@@ -244,9 +276,9 @@ describe('D3-P2: removeDependency', () => {
       .where(eq(taskDependencies.fromTaskId, fromId));
     expect(depRows).toHaveLength(0);
 
-    // Status stays 'blocked' — must be manually updated by actor.
+    // EC-3: removing the last unresolved dependency auto-reverts todo/doing → blocked workflow back to `todo`.
     const taskRow = (await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, fromId)))[0]!;
-    expect(taskRow.status).toBe('blocked');
+    expect(taskRow.status).toBe('todo');
   });
 });
 
