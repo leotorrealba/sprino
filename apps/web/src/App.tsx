@@ -168,12 +168,12 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!token || !selectedProjectId) { setMembers([]); return; }
-    fetchAuth(`/api/members?project_id=${selectedProjectId}`)
+    if (!token) { setMembers([]); return; }
+    fetchAuth('/api/actors')
       .then((r) => r.ok ? r.json() : Promise.resolve({ actors: [] }))
       .then((j: { actors: Actor[] }) => setMembers(j.actors))
       .catch(() => setMembers([]));
-  }, [fetchAuth, token, selectedProjectId]);
+  }, [fetchAuth, token]);
 
   // Restore filter state from URL params on mount (shareable links).
   useEffect(() => {
