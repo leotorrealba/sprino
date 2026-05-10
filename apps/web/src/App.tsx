@@ -435,7 +435,7 @@ export function App() {
                 value={newProjectSlug}
                 onChange={(e) => setNewProjectSlug(e.target.value)}
                 placeholder="slug (e.g. my-project)"
-                pattern="^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
                 required
                 className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
               />
