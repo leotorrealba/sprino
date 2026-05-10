@@ -368,6 +368,7 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       result: { tools: Array<{ name: string }> };
     };
     expect(body.result.tools.map((t) => t.name).sort()).toEqual([
+      'audit.export',
       'sprino.actor.deactivate',
       'sprino.actor.get',
       'sprino.actor.heartbeat',

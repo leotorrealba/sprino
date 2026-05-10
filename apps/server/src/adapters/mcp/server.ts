@@ -55,6 +55,7 @@ import {
   ActorDeactivateReqSchema,
   SavedViewCreateReqSchema,
   AutomationRuleCreateReqSchema,
+  EventKindSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -138,6 +139,8 @@ import {
   revokeToken,
 } from '../../service/actors.ts';
 import { AuthorizationForbiddenError } from '../../service/authorization.ts';
+import { exportAuditEvents } from '../../service/audit-export.ts';
+import { resolveWorkspaceById } from '../../service/workspaces.ts';
 
 type Env = AuthEnv;
 
@@ -673,6 +676,34 @@ const TOOL_DEFINITIONS = [
       required: ['rule_id', 'project_id'],
     },
   },
+  {
+    name: 'audit.export',
+    description: 'Export paginated audit events for the current workspace.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['workspaceId'],
+      properties: {
+        workspaceId: { type: 'string', format: 'uuid' },
+        actorId: { type: 'string', format: 'uuid' },
+        kind: {
+          type: 'string',
+          enum: [
+            'created',
+            'status_changed',
+            'assigned',
+            'context_updated',
+            'commented',
+            'workflow_transitioned',
+          ],
+        },
+        since: { type: 'string', format: 'date-time' },
+        until: { type: 'string', format: 'date-time' },
+        limit: { type: 'integer', minimum: 1, maximum: 500 },
+        offset: { type: 'integer', minimum: 0 },
+      },
+    },
+  },
 ];
 
 export function buildMcpRoutes(): Hono<Env> {
@@ -940,6 +971,36 @@ async function callTool(
         .parse(args);
       await deleteAutomationRule(db, { ruleId: rule_id, projectId: project_id });
       return wrapToolResult({});
+    }
+    case 'audit.export': {
+      const parsed = z
+        .object({
+          workspaceId: z.string().uuid(),
+          actorId: z.string().uuid().optional(),
+          kind: EventKindSchema.optional(),
+          since: z.string().datetime({ offset: true }).optional(),
+          until: z.string().datetime({ offset: true }).optional(),
+          limit: z.coerce.number().int().min(1).max(500).optional(),
+          offset: z.coerce.number().int().min(0).optional(),
+        })
+        .parse(args);
+      const member = await resolveWorkspaceById(db, {
+        workspaceId: parsed.workspaceId,
+        actorId: actor.id,
+      });
+      if (!member) {
+        throw new RpcMethodError(-32003, 'forbidden');
+      }
+      const res = await exportAuditEvents(db, {
+        workspaceId: parsed.workspaceId,
+        actorId: parsed.actorId,
+        kind: parsed.kind,
+        since: parsed.since,
+        until: parsed.until,
+        limit: parsed.limit,
+        offset: parsed.offset,
+      });
+      return wrapToolResult(res);
     }
     default:
       throw new RpcMethodError(-32602, `Unknown tool: ${name}`);
