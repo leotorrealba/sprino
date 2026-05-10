@@ -19,7 +19,7 @@
 
 import { and, asc, desc, eq, gt } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { actors, events, tasks } from '../db/schema.ts';
+import { actors, events, projects, tasks } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
   type EventWithActor,
@@ -55,9 +55,11 @@ export async function listEvents(
       actor_display_name: actors.displayName,
       actor_kind: actors.kind,
       task_title: tasks.title,
+      workspace_id: projects.workspaceId,
     })
     .from(events)
     .innerJoin(tasks, eq(events.taskId, tasks.id))
+    .innerJoin(projects, eq(tasks.projectId, projects.id))
     .innerJoin(actors, eq(events.actorId, actors.id))
     .where(whereClause)
     .orderBy(desc(events.createdAt), desc(events.id))
@@ -72,6 +74,7 @@ export async function listEvents(
     payload: r.payload as Record<string, unknown>,
     operation_id: r.operation_id,
     created_at: r.created_at.toISOString(),
+    workspace_id: r.workspace_id,
     actor: {
       id: r.actor_id,
       display_name: r.actor_display_name,
@@ -127,9 +130,11 @@ export async function listEventsAfter(
       actor_display_name: actors.displayName,
       actor_kind: actors.kind,
       task_title: tasks.title,
+      workspace_id: projects.workspaceId,
     })
     .from(events)
     .innerJoin(tasks, eq(events.taskId, tasks.id))
+    .innerJoin(projects, eq(tasks.projectId, projects.id))
     .innerJoin(actors, eq(events.actorId, actors.id))
     .where(
       and(eq(tasks.projectId, args.projectId), gt(events.id, args.afterEventId)),
@@ -145,6 +150,7 @@ export async function listEventsAfter(
     payload: r.payload as Record<string, unknown>,
     operation_id: r.operation_id,
     created_at: r.created_at.toISOString(),
+    workspace_id: r.workspace_id,
     actor: {
       id: r.actor_id,
       display_name: r.actor_display_name,

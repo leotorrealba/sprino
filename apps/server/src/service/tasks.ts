@@ -76,6 +76,21 @@ import { assertProjectInWorkspace } from './authorization.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
+/**
+ * Returns the Tessera event payload body unchanged.
+ *
+ * workspace_id is NOT embedded in the payload: it is a first-class column
+ * surfaced via SQL JOIN on EventWithActor (see service/events.ts).
+ * Injecting it into the payload JSON would violate the Tessera protocol
+ * contract (payload must contain only task delta fields).
+ */
+function governancePayload(
+  _workspaceId: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  return body;
+}
+
 export class TaskNotFoundError extends Error {
   constructor(public readonly taskId: string) {
     super(`task ${taskId} not found`);
@@ -435,7 +450,10 @@ export async function createTask(
           taskId,
           actorId: args.actorId,
           kind: 'created',
-          payload: { title: args.req.title, status: 'todo' },
+          payload: governancePayload(args.workspaceId, {
+            title: args.req.title,
+            status: 'todo',
+          }),
           operationId: args.req.operation_id,
           createdAt: now,
         })
@@ -568,11 +586,11 @@ export async function updateTaskStatus(
           taskId: args.req.task_id,
           actorId: args.actorId,
           kind: 'status_changed',
-          payload: {
+          payload: governancePayload(args.workspaceId, {
             from: previousStatus,
             to: args.req.status,
             ...(args.req.notes !== undefined ? { notes: args.req.notes } : {}),
-          },
+          }),
           operationId: args.req.operation_id,
           createdAt: now,
         })
@@ -767,11 +785,11 @@ export async function transitionTaskWorkflow(
           taskId: args.req.task_id,
           actorId: args.actorId,
           kind: 'workflow_transitioned',
-          payload: {
+          payload: governancePayload(args.workspaceId, {
             from_column_id: current.workflowColumnId,
             to_column_id: args.req.to_column_id,
             ...(args.req.notes !== undefined ? { notes: args.req.notes } : {}),
-          },
+          }),
           operationId: args.req.operation_id,
           createdAt: now,
         })
@@ -1010,7 +1028,11 @@ export async function setParent(
       taskId: args.taskId,
       actorId: args.actorId,
       kind: 'context_updated',
-      payload: { field: 'parent_task_id', old: prevParentId, new: args.parentTaskId },
+      payload: governancePayload(args.workspaceId, {
+        field: 'parent_task_id',
+        old: prevParentId,
+        new: args.parentTaskId,
+      }),
       operationId: uuidv7(),
       createdAt: now,
     });
@@ -1059,7 +1081,10 @@ export async function addDependency(
     taskId: args.fromTaskId,
     actorId: args.actorId,
     kind: 'context_updated',
-    payload: { field: 'dependency_added', blocked_by_task_id: args.toTaskId },
+    payload: governancePayload(args.workspaceId, {
+      field: 'dependency_added',
+      blocked_by_task_id: args.toTaskId,
+    }),
     operationId: uuidv7(),
     createdAt: now,
   });
@@ -1113,7 +1138,7 @@ export async function removeDependency(
           taskId: args.fromTaskId,
           actorId: args.actorId,
           kind: 'status_changed',
-          payload: { from: 'blocked', to: 'todo' },
+          payload: governancePayload(args.workspaceId, { from: 'blocked', to: 'todo' }),
           operationId: uuidv7(),
           createdAt: now,
         });
@@ -1134,7 +1159,10 @@ export async function removeDependency(
       taskId: args.fromTaskId,
       actorId: args.actorId,
       kind: 'context_updated',
-      payload: { field: 'dependency_removed', blocked_by_task_id: args.toTaskId },
+      payload: governancePayload(args.workspaceId, {
+        field: 'dependency_removed',
+        blocked_by_task_id: args.toTaskId,
+      }),
       operationId: uuidv7(),
       createdAt: now,
     });
@@ -1203,7 +1231,10 @@ export async function updateTaskPoints(
           taskId: args.req.task_id,
           actorId: args.actorId,
           kind: 'context_updated',
-          payload: { field: 'points', new: args.req.points },
+          payload: governancePayload(args.workspaceId, {
+            field: 'points',
+            new: args.req.points,
+          }),
           operationId: args.req.operation_id,
           createdAt: now,
         })

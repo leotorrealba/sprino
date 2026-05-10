@@ -101,6 +101,7 @@ export type Event = z.infer<typeof EventSchema>;
 // `.pick(...)` so this response shape stays in lockstep with the canonical
 // resource shapes — no drift in min/max bounds.
 export const EventWithActorSchema = EventSchema.extend({
+  workspace_id: uuid,
   actor: ActorSchema.pick({
     id: true,
     display_name: true,
