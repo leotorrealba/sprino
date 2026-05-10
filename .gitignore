@@ -62,3 +62,6 @@ docs/orchestration/
 # Visual companion brainstorm artifacts
 .superpowers/
 .gstack/
+
+# Graphify analysis output (generated)
+graphify-out/
