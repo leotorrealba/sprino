@@ -3,7 +3,11 @@ import { eq } from 'drizzle-orm';
 
 import type { Db } from '../db/client.ts';
 import { workspacePlans } from '../db/schema.ts';
-import { PlanSchema, type WorkspacePlan } from '../domain/index.ts';
+import {
+  AuditExportNotEnabledError,
+  PlanSchema,
+  type WorkspacePlan,
+} from '../domain/index.ts';
 
 /** Stable sentinel when no DB row exists (no write on read — evaluation-only fallback). */
 const FREE_PLAN_DEFAULT_UPDATED_AT = '1970-01-01T00:00:00.000Z';
@@ -61,4 +65,15 @@ export async function getWorkspacePlan(
   }
 
   return rowToWorkspacePlan(workspaceId, row);
+}
+
+/** Throws when the workspace plan does not allow audit export (HTTP/MCP gate). */
+export async function assertAuditExportEnabled(
+  db: Db,
+  workspaceId: string,
+): Promise<void> {
+  const plan = await getWorkspacePlan(db, workspaceId);
+  if (!plan.audit_export_enabled) {
+    throw new AuditExportNotEnabledError(workspaceId);
+  }
 }

@@ -290,7 +290,13 @@ export async function listWorkspaceMembers(
 // ── Auth middleware helpers ────────────────────────────────────────────────
 
 export type WorkspaceResolution =
-  | { kind: 'resolved'; workspaceId: string; role: 'admin' | 'member' }
+  | {
+      kind: 'resolved';
+      workspaceId: string;
+      name: string;
+      slug: string;
+      role: 'admin' | 'member';
+    }
   | { kind: 'none' }
   | { kind: 'ambiguous' };
 
@@ -299,16 +305,30 @@ export async function resolveWorkspaceForActor(
   actorId: string,
 ): Promise<WorkspaceResolution> {
   const rows = await db
-    .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
-    .from(workspaceMembers)
-    .where(eq(workspaceMembers.actorId, actorId))
-    .limit(3);  // only need to distinguish 0, 1, vs 2+
+    .select({
+      workspaceId: workspaces.id,
+      name: workspaces.name,
+      slug: workspaces.slug,
+      role: workspaceMembers.role,
+    })
+    .from(workspaces)
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.workspaceId, workspaces.id),
+        eq(workspaceMembers.actorId, actorId),
+      ),
+    )
+    .limit(3); // only need to distinguish 0, 1, vs 2+
 
   if (rows.length === 1) {
+    const r = rows[0]!;
     return {
       kind: 'resolved',
-      workspaceId: rows[0]!.workspaceId,
-      role: rows[0]!.role,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      slug: r.slug,
+      role: r.role,
     };
   }
   if (rows.length === 0) return { kind: 'none' };

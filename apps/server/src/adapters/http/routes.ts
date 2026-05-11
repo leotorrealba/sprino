@@ -63,6 +63,8 @@ import {
   AutomationRuleCreateReqSchema,
   WorkspaceCreateReqSchema,
   WorkspaceMemberAddReqSchema,
+  AuditExportNotEnabledError,
+  EntitlementLimitError,
 } from '../../domain/index.ts';
 import {
   AttachmentAlreadyFinalizedError,
@@ -120,7 +122,10 @@ import {
   removeWorkspaceMember,
   resolveWorkspaceById,
 } from '../../service/workspaces.ts';
-import { getWorkspacePlan } from '../../service/entitlements.ts';
+import {
+  assertAuditExportEnabled,
+  getWorkspacePlan,
+} from '../../service/entitlements.ts';
 import {
   ChildrenNotDoneError,
   CrossProjectRelationError,
@@ -616,6 +621,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
+      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,
@@ -641,6 +647,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
+      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,
@@ -1109,6 +1116,12 @@ function workspaceErrorResponse(c: any, err: unknown): Response {
   if (err instanceof WorkspaceLastAdminError) {
     return c.json({ error: 'workspace_last_admin' }, 409);
   }
+  if (err instanceof EntitlementLimitError) {
+    return c.json(
+      { error: 'entitlement_limit', resource: err.resource, limit: err.limit },
+      403,
+    );
+  }
   console.error('Unhandled workspace error:', err);
   return c.json({ error: 'internal_error' }, 500);
 }
@@ -1445,6 +1458,18 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof AutomationRuleNotFoundError) {
     return c.json({ error: 'automation_rule_not_found', rule_id: err.ruleId }, 404);
+  }
+  if (err instanceof AuditExportNotEnabledError) {
+    return c.json(
+      { error: 'audit_export_not_enabled', workspace_id: err.workspaceId },
+      403,
+    );
+  }
+  if (err instanceof EntitlementLimitError) {
+    return c.json(
+      { error: 'entitlement_limit', resource: err.resource, limit: err.limit },
+      403,
+    );
   }
   if (err instanceof WorkspaceIsolationError) {
     return c.json(

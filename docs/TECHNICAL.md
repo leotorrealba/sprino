@@ -549,9 +549,24 @@ shared servers.
 
 ---
 
+## 10f. Plan-gated audit export (E3)
+
+Audit export (HTTP and MCP **`audit.export`**) is additionally gated by
+**`workspace_plans.audit_export_enabled`** (default **false** when no plan row exists).
+HTTP returns **403** with `audit_export_not_enabled`; MCP surfaces the same condition
+as JSON-RPC **`-32003`** with `data.workspace_id`. This keeps free / implicit plans
+safe-by-default while leaving room for paid tiers.
+
+Full rationale, edge cases, and test notes: [ADR 0001](./adr/0001-e1-e2-e3-workspace-audit-entitlements.md)
+(which also summarizes **E1** workspace auth and **E2** export isolation for cross-reference).
+
+---
+
 ## 11. Where to go next
 
 - New to the project? Read [`docs/EXPLAINED.md`](./EXPLAINED.md).
+- Recorded architecture decisions: [`docs/adr/`](./adr/) (indexed by number;
+  start with [ADR 0001](./adr/0001-e1-e2-e3-workspace-audit-entitlements.md) for E1–E3).
 - Implementing Tessera in another language? Start with the [Tessera SPEC](https://github.com/leotorrealba/tessera/blob/main/SPEC.md)
   and run our conformance suite against your server.
 - Contributing? Read [`CONTRIBUTING.md`](../CONTRIBUTING.md) and

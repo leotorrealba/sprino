@@ -883,10 +883,20 @@ export const WorkspacePlanSchema = z.object({
 export type WorkspacePlan = z.infer<typeof WorkspacePlanSchema>;
 
 export class EntitlementLimitError extends Error {
-  constructor(resource: string, limit: number) {
+  constructor(
+    public readonly resource: string,
+    public readonly limit: number,
+  ) {
     super(
       `Workspace has reached the ${resource} limit of ${limit} for its current plan`,
     );
     this.name = 'EntitlementLimitError';
+  }
+}
+
+export class AuditExportNotEnabledError extends Error {
+  constructor(public readonly workspaceId: string) {
+    super(`Audit export is not enabled for workspace ${workspaceId}`);
+    this.name = 'AuditExportNotEnabledError';
   }
 }

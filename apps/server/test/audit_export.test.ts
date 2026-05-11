@@ -5,7 +5,7 @@
  */
 
 import { v7 as uuidv7 } from 'uuid';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
 import {
   actors,
@@ -13,6 +13,7 @@ import {
   events,
   projects,
   workspaceMembers,
+  workspacePlans,
 } from '../src/db/schema.ts';
 import { hashToken } from '../src/auth/registry.ts';
 import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
@@ -213,63 +214,180 @@ describe('audit export (E2-P2)', () => {
   });
 
   describe('HTTP GET /audit/export', () => {
-    it('returns 200 JSON with events and total', async () => {
-      await createTask(db, {
-        req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http json' },
-        actorId: FIXTURE_ACTOR_ID,
-        workspaceId: FIXTURE_WORKSPACE_ID,
+    describe('when audit export is enabled (E3)', () => {
+      beforeEach(async () => {
+        await db.insert(workspacePlans).values({
+          workspaceId: FIXTURE_WORKSPACE_ID,
+          plan: 'free',
+          maxProjects: 10,
+          maxMembers: 10,
+          auditExportEnabled: true,
+        });
       });
-      const app = buildTestApp();
-      const r = await app.fetch(
-        new Request('http://test/api/audit/export', {
-          headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
-        }),
-      );
-      expect(r.status).toBe(200);
-      const body = (await r.json()) as { events: unknown[]; total: number };
-      expect(Array.isArray(body.events)).toBe(true);
-      expect(body.total).toBeGreaterThanOrEqual(1);
+
+      it('returns 200 JSON with events and total', async () => {
+        await createTask(db, {
+          req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http json' },
+          actorId: FIXTURE_ACTOR_ID,
+          workspaceId: FIXTURE_WORKSPACE_ID,
+        });
+        const app = buildTestApp();
+        const r = await app.fetch(
+          new Request('http://test/api/audit/export', {
+            headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+          }),
+        );
+        expect(r.status).toBe(200);
+        const body = (await r.json()) as { events: unknown[]; total: number };
+        expect(Array.isArray(body.events)).toBe(true);
+        expect(body.total).toBeGreaterThanOrEqual(1);
+      });
+
+      it('GET /audit/export/csv returns text/csv', async () => {
+        await createTask(db, {
+          req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http csv' },
+          actorId: FIXTURE_ACTOR_ID,
+          workspaceId: FIXTURE_WORKSPACE_ID,
+        });
+        const app = buildTestApp();
+        const r = await app.fetch(
+          new Request('http://test/api/audit/export/csv', {
+            headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+          }),
+        );
+        expect(r.status).toBe(200);
+        expect(r.headers.get('content-type')).toMatch(/text\/csv/);
+        const text = await r.text();
+        expect(text.split('\n')[0]).toBe(
+          'id,task_id,actor_id,kind,created_at,workspace_id',
+        );
+      });
+
+      it('workspace A token cannot see workspace B events', async () => {
+        const wsB = await seedWorkspace({ slug: 'iso-http' });
+        const projB = await seedProjectInWorkspace(wsB);
+        const { actorId: actorB } = await seedActorInWorkspace(wsB);
+        const taskB = await createTask(db, {
+          req: { operation_id: uuidv7(), project_id: projB, title: 'secret' },
+          actorId: actorB,
+          workspaceId: wsB,
+        });
+
+        const app = buildTestApp();
+        const r = await app.fetch(
+          new Request('http://test/api/audit/export', {
+            headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+          }),
+        );
+        expect(r.status).toBe(200);
+        const body = (await r.json()) as { events: { id: string }[] };
+        expect(body.events.map((e) => e.id)).not.toContain(taskB.event.id);
+      });
     });
 
-    it('GET /audit/export/csv returns text/csv', async () => {
-      await createTask(db, {
-        req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'http csv' },
-        actorId: FIXTURE_ACTOR_ID,
-        workspaceId: FIXTURE_WORKSPACE_ID,
+    describe('when audit export is not enabled', () => {
+      it('returns 403 JSON with audit_export_not_enabled', async () => {
+        const app = buildTestApp();
+        const r = await app.fetch(
+          new Request('http://test/api/audit/export', {
+            headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+          }),
+        );
+        expect(r.status).toBe(403);
+        const body = (await r.json()) as { error: string; workspace_id: string };
+        expect(body.error).toBe('audit_export_not_enabled');
+        expect(body.workspace_id).toBe(FIXTURE_WORKSPACE_ID);
       });
-      const app = buildTestApp();
-      const r = await app.fetch(
-        new Request('http://test/api/audit/export/csv', {
-          headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
-        }),
-      );
-      expect(r.status).toBe(200);
-      expect(r.headers.get('content-type')).toMatch(/text\/csv/);
-      const text = await r.text();
-      expect(text.split('\n')[0]).toBe(
-        'id,task_id,actor_id,kind,created_at,workspace_id',
-      );
+
+      it('returns 403 for CSV export', async () => {
+        const app = buildTestApp();
+        const r = await app.fetch(
+          new Request('http://test/api/audit/export/csv', {
+            headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+          }),
+        );
+        expect(r.status).toBe(403);
+        const body = (await r.json()) as { error: string; workspace_id: string };
+        expect(body.error).toBe('audit_export_not_enabled');
+      });
+    });
+  });
+
+  describe('MCP audit.export (E3)', () => {
+    describe('when audit export is enabled', () => {
+      beforeEach(async () => {
+        await db.insert(workspacePlans).values({
+          workspaceId: FIXTURE_WORKSPACE_ID,
+          plan: 'free',
+          maxProjects: 10,
+          maxMembers: 10,
+          auditExportEnabled: true,
+        });
+      });
+
+      it('returns tool result with events', async () => {
+        await createTask(db, {
+          req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'mcp audit' },
+          actorId: FIXTURE_ACTOR_ID,
+          workspaceId: FIXTURE_WORKSPACE_ID,
+        });
+        const app = buildTestApp();
+        const res = await app.fetch(
+          new Request('http://test/mcp', {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${FIXTURE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'tools/call',
+              params: {
+                name: 'audit.export',
+                arguments: { workspaceId: FIXTURE_WORKSPACE_ID },
+              },
+            }),
+          }),
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          result: {
+            structuredContent: { events: unknown[]; total: number };
+          };
+        };
+        expect(body.result.structuredContent.total).toBeGreaterThanOrEqual(1);
+        expect(Array.isArray(body.result.structuredContent.events)).toBe(true);
+      });
     });
 
-    it('workspace A token cannot see workspace B events', async () => {
-      const wsB = await seedWorkspace({ slug: 'iso-http' });
-      const projB = await seedProjectInWorkspace(wsB);
-      const { actorId: actorB } = await seedActorInWorkspace(wsB);
-      const taskB = await createTask(db, {
-        req: { operation_id: uuidv7(), project_id: projB, title: 'secret' },
-        actorId: actorB,
-        workspaceId: wsB,
-      });
-
+    it('returns JSON-RPC error when export is not enabled', async () => {
       const app = buildTestApp();
-      const r = await app.fetch(
-        new Request('http://test/api/audit/export', {
-          headers: withWs(FIXTURE_TOKEN, FIXTURE_WORKSPACE_ID),
+      const res = await app.fetch(
+        new Request('http://test/mcp', {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${FIXTURE_TOKEN}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'tools/call',
+            params: {
+              name: 'audit.export',
+              arguments: { workspaceId: FIXTURE_WORKSPACE_ID },
+            },
+          }),
         }),
       );
-      expect(r.status).toBe(200);
-      const body = (await r.json()) as { events: { id: string }[] };
-      expect(body.events.map((e) => e.id)).not.toContain(taskB.event.id);
+      expect(res.status).toBe(200);
+      const mcpBody = (await res.json()) as {
+        error: { code: number; message: string; data: { workspace_id: string } };
+      };
+      expect(mcpBody.error.code).toBe(-32003);
+      expect(mcpBody.error.message).toBe('audit_export_not_enabled');
+      expect(mcpBody.error.data.workspace_id).toBe(FIXTURE_WORKSPACE_ID);
     });
   });
 });
