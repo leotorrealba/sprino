@@ -28,7 +28,7 @@ import { afterAll, beforeEach } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 
 import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
-import { tokenAuth } from '../src/auth/middleware.ts';
+import { mcpWorkspaceAuth, tokenAuth } from '../src/auth/middleware.ts';
 import type { AuthEnv } from '../src/auth/middleware.ts';
 import { closeDb, db } from '../src/db/client.ts';
 import { actors, actorTokens, projects, tasks, workspaces, workspaceMembers } from '../src/db/schema.ts';
@@ -68,6 +68,8 @@ export function buildTestApp(): Hono<AuthEnv> {
 
   const mcp = new Hono<AuthEnv>();
   mcp.use('*', tokenAuth);
+  // Match apps/server/src/main.ts: workspace resolution for MCP-before tools
+  mcp.use('*', mcpWorkspaceAuth);
   mcp.route('/', buildMcpRoutes());
   app.route('/mcp', mcp);
 
