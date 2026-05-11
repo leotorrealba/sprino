@@ -151,6 +151,17 @@ export const workspaces = pgTable('workspaces', {
     .defaultNow(),
 });
 
+export const workspacePlans = pgTable('workspace_plans', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  plan: text('plan').notNull().default('free'),
+  maxProjects: integer('max_projects').notNull().default(3),
+  maxMembers: integer('max_members').notNull().default(5),
+  auditExportEnabled: boolean('audit_export_enabled').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const workspaceMembers = pgTable(
   'workspace_members',
   {
@@ -484,5 +495,7 @@ export type AutomationRuleRow = typeof automationRules.$inferSelect;
 export type NewAutomationRuleRow = typeof automationRules.$inferInsert;
 export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type NewWorkspaceRow = typeof workspaces.$inferInsert;
+export type WorkspacePlanRow = typeof workspacePlans.$inferSelect;
+export type NewWorkspacePlanRow = typeof workspacePlans.$inferInsert;
 export type WorkspaceMemberRow = typeof workspaceMembers.$inferSelect;
 export type NewWorkspaceMemberRow = typeof workspaceMembers.$inferInsert;

@@ -80,7 +80,7 @@ export async function resetDb(): Promise<void> {
   // listed explicitly so its sequence resets cleanly even if FK CASCADE
   // ordering differs across Postgres versions.
   await db.execute(
-    sql`TRUNCATE TABLE attachments, events, operations, tasks, sprints, sprint_tasks, saved_views, automation_rules, task_dependencies, workflow_transitions, workflow_columns, projects, workspace_members, workspaces, actor_tokens, actors RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE attachments, events, operations, tasks, sprints, sprint_tasks, saved_views, automation_rules, task_dependencies, workflow_transitions, workflow_columns, projects, workspace_members, workspace_plans, workspaces, actor_tokens, actors RESTART IDENTITY CASCADE`,
   );
 
   // Ensure the default workspace exists before seeding actors/projects.

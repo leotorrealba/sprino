@@ -867,3 +867,17 @@ export const WorkspaceMemberListResSchema = z.object({
   members: z.array(WorkspaceMemberSchema),
 });
 export type WorkspaceMemberListRes = z.infer<typeof WorkspaceMemberListResSchema>;
+
+// ── E3: Workspace plan / entitlements ────────────────────────────────────
+
+export const PlanSchema = z.enum(['free', 'pro', 'enterprise']);
+
+export const WorkspacePlanSchema = z.object({
+  workspace_id: uuid,
+  plan: PlanSchema,
+  max_projects: z.number().int().positive(),
+  max_members: z.number().int().positive(),
+  audit_export_enabled: z.boolean(),
+  updated_at: isoDateTime,
+});
+export type WorkspacePlan = z.infer<typeof WorkspacePlanSchema>;
