@@ -118,7 +118,9 @@ import {
   listWorkspaceMembers,
   addWorkspaceMember,
   removeWorkspaceMember,
+  resolveWorkspaceById,
 } from '../../service/workspaces.ts';
+import { getWorkspacePlan } from '../../service/entitlements.ts';
 import {
   ChildrenNotDoneError,
   CrossProjectRelationError,
@@ -1022,6 +1024,27 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   // has already validated the bearer token, but they do NOT require a workspace
   // context header. The service functions verify the caller is a member of the
   // *requested* workspace before acting (preventing IDOR cross-workspace access).
+
+  api.get('/workspaces/:workspaceId/plan', async (c) => {
+    try {
+      const workspaceId = c.req.param('workspaceId');
+      const headerWs = c.req.header('x-workspace-id');
+      if (headerWs && headerWs !== workspaceId) {
+        return c.json({ error: 'workspace_id_mismatch' }, 400);
+      }
+      const access = await resolveWorkspaceById(c.get('db'), {
+        workspaceId,
+        actorId: c.get('actor').id,
+      });
+      if (!access) {
+        return c.json({ error: 'workspace_not_found_or_not_member' }, 403);
+      }
+      const plan = await getWorkspacePlan(c.get('db'), workspaceId);
+      return c.json(plan, 200);
+    } catch (err) {
+      return workspaceErrorResponse(c, err);
+    }
+  });
 
   api.get('/workspaces/:id/members', async (c) => {
     try {

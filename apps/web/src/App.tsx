@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Actor, Project, Task, TaskStatus, Workspace } from '@sprino/protocol-types';
+import { BillingUsage } from './components/BillingUsage';
 import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
@@ -12,7 +13,7 @@ import type { TaskFilters } from '@sprino/protocol-types';
 import { uuidv7 } from './lib/uuid';
 
 type LoadState = 'idle' | 'loading' | 'error';
-type View = 'tasks' | 'members' | 'board' | 'sprint';
+type View = 'tasks' | 'members' | 'board' | 'sprint' | 'billing';
 
 const STATUSES: TaskStatus[] = ['todo', 'doing', 'done', 'blocked'];
 
@@ -381,6 +382,16 @@ export function App() {
               >
                 Sprint
               </button>
+              <button
+                onClick={() => setView('billing')}
+                className={`rounded px-3 py-1.5 font-medium ${
+                  view === 'billing'
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Billing
+              </button>
             </nav>
             <select
               value={selectedProjectId}
@@ -466,7 +477,9 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-4xl px-6 py-8">
-        {view === 'members' ? (
+        {view === 'billing' ? (
+          <BillingUsage workspaceId={workspaceId} token={token} />
+        ) : view === 'members' ? (
           <Members token={token} workspaceId={workspaceId} />
         ) : view === 'sprint' ? (
           selectedProjectId ? (
