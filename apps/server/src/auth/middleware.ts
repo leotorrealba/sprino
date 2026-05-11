@@ -73,20 +73,79 @@ export const workspaceAuth: MiddlewareHandler<AuthEnv> = async (c, next) => {
   // No header — try auto-select
   const resolution = await resolveWorkspaceForActor(db, actor.id);
   if (resolution.kind === 'resolved') {
-    // Fetch workspace name/slug for context
     const resolved = await resolveWorkspaceById(db, {
       workspaceId: resolution.workspaceId,
       actorId: actor.id,
     });
-    if (resolved) {
-      c.set('workspace', {
-        id: resolved.workspaceId,
-        name: resolved.name,
-        slug: resolved.slug,
-        role: resolved.role,
-      });
+    if (!resolved) {
+      return c.json({ error: 'workspace_resolution_failed' }, 500);
     }
+    c.set('workspace', {
+      id: resolved.workspaceId,
+      name: resolved.name,
+      slug: resolved.slug,
+      role: resolved.role,
+    });
     return next();
+  }
+
+  return c.json({ error: 'workspace_id_required' }, 400);
+};
+
+/**
+ * Workspace resolution for MCP: same as `workspaceAuth` when an
+ * `X-Workspace-ID` header is present or the actor belongs to exactly one
+ * workspace. Unlike HTTP `/api/*`, when the actor has **zero** workspaces
+ * the request still proceeds so global tools (e.g. `sprino.actor.register`)
+ * work before any membership exists. Workspace-scoped tools must check
+ * `c.var.workspace` and return `workspace_id_required` if unset.
+ */
+export const mcpWorkspaceAuth: MiddlewareHandler<AuthEnv> = async (
+  c,
+  next,
+) => {
+  const db = c.get('db');
+  const actor = c.get('actor');
+  const headerWsId = c.req.header('x-workspace-id');
+
+  if (headerWsId) {
+    const resolved = await resolveWorkspaceById(db, {
+      workspaceId: headerWsId,
+      actorId: actor.id,
+    });
+    if (!resolved) {
+      return c.json({ error: 'workspace_not_found_or_not_member' }, 403);
+    }
+    c.set('workspace', {
+      id: resolved.workspaceId,
+      name: resolved.name,
+      slug: resolved.slug,
+      role: resolved.role,
+    });
+    return next();
+  }
+
+  const resolution = await resolveWorkspaceForActor(db, actor.id);
+  if (resolution.kind === 'resolved') {
+    const resolved = await resolveWorkspaceById(db, {
+      workspaceId: resolution.workspaceId,
+      actorId: actor.id,
+    });
+    if (!resolved) {
+      return c.json({ error: 'workspace_resolution_failed' }, 500);
+    }
+    c.set('workspace', {
+      id: resolved.workspaceId,
+      name: resolved.name,
+      slug: resolved.slug,
+      role: resolved.role,
+    });
+    return next();
+  }
+
+  if (resolution.kind === 'none') {
+    await next();
+    return;
   }
 
   return c.json({ error: 'workspace_id_required' }, 400);

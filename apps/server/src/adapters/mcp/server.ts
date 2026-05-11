@@ -23,7 +23,7 @@ import { Hono } from 'hono';
 import { z, ZodError } from 'zod';
 import type { ActorEntry } from '../../auth/registry.ts';
 import type { Db } from '../../db/client.ts';
-import type { AuthEnv } from '../../auth/middleware.ts';
+import type { AuthEnv, WorkspaceEntry } from '../../auth/middleware.ts';
 import {
   AttachmentCreateUploadReqSchema,
   AttachmentFinalizeReqSchema,
@@ -72,7 +72,6 @@ import {
   heartbeatAgent,
 } from '../../service/agent-lifecycle.ts';
 import {
-  DEFAULT_WORKSPACE_ID,
   ProjectNotFoundError,
   ProjectSlugConflictError,
   createProject,
@@ -675,6 +674,26 @@ const TOOL_DEFINITIONS = [
   },
 ];
 
+class RpcMethodError extends Error {
+  constructor(
+    public readonly code: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Workspace-scoped MCP tools must run with a resolved workspace (header or auto-select). */
+function requireWorkspaceId(c: {
+  get(key: 'workspace'): WorkspaceEntry | undefined;
+}): string {
+  const ws = c.get('workspace');
+  if (!ws) {
+    throw new RpcMethodError(-32602, 'workspace_id_required');
+  }
+  return ws.id;
+}
+
 export function buildMcpRoutes(): Hono<Env> {
   const mcp = new Hono<Env>();
 
@@ -741,71 +760,94 @@ async function callTool(
 
   switch (name) {
     case 'sprino.project.create': {
+      const workspaceId = requireWorkspaceId(c);
       const req = ProjectCreateReqSchema.parse(args);
-      const res = await createProject(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5): workspace from actor context
+      const res = await createProject(db, {
+        req,
+        actorId: actor.id,
+        workspaceId,
+      });
       return wrapToolResult(res);
     }
     case 'sprino.project.list': {
-      const res = await listProjects(db, { workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const workspaceId = requireWorkspaceId(c);
+      const res = await listProjects(db, { workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.project.get': {
+      const workspaceId = requireWorkspaceId(c);
       const req = ProjectGetReqSchema.parse(args ?? {});
-      const res = await getProject(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await getProject(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.create': {
+      const workspaceId = requireWorkspaceId(c);
       const req = TaskCreateReqSchema.parse(args);
-      const res = await createTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await createTask(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.get': {
+      const workspaceId = requireWorkspaceId(c);
       const req = TaskGetReqSchema.parse(args);
-      const res = await getTask(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await getTask(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.update_status': {
+      const workspaceId = requireWorkspaceId(c);
       const req = TaskUpdateStatusReqSchema.parse(args);
-      const res = await updateTaskStatus(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await updateTaskStatus(db, {
+        req,
+        actorId: actor.id,
+        workspaceId,
+      });
       return wrapToolResult(res);
     }
     case 'sprino.task.transition_workflow': {
+      const workspaceId = requireWorkspaceId(c);
       const req = TaskTransitionWorkflowReqSchema.parse(args);
-      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await transitionTaskWorkflow(db, {
+        req,
+        actorId: actor.id,
+        workspaceId,
+      });
       return wrapToolResult(res);
     }
     case 'sprino.task.reorder': {
+      const workspaceId = requireWorkspaceId(c);
       const req = TaskReorderReqSchema.parse(args);
-      const res = await reorderTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await reorderTask(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.set_parent': {
+      const workspaceId = requireWorkspaceId(c);
       const req = SetParentReqSchema.parse(args);
       const res = await setParent(db, {
         taskId: req.task_id,
         parentTaskId: req.parent_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult(res);
     }
     case 'sprino.task.add_dependency': {
+      const workspaceId = requireWorkspaceId(c);
       const req = AddDependencyReqSchema.parse(args);
       const res = await addDependency(db, {
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult(res);
     }
     case 'sprino.task.remove_dependency': {
+      const workspaceId = requireWorkspaceId(c);
       const req = RemoveDependencyReqSchema.parse(args);
       await removeDependency(db, {
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult({ ok: true });
     }
@@ -820,8 +862,9 @@ async function callTool(
       return wrapToolResult(res);
     }
     case 'sprino.actor.list': {
+      const workspaceId = requireWorkspaceId(c);
       const req = ActorListReqSchema.parse(args ?? {});
-      const res = await listActors(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await listActors(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.actor.get': {
@@ -903,8 +946,13 @@ async function callTool(
       return wrapToolResult({ ok: true });
     }
     case 'sprino.task.set_points': {
+      const workspaceId = requireWorkspaceId(c);
       const req = UpdateTaskPointsReqSchema.parse(args);
-      const res = await updateTaskPoints(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await updateTaskPoints(db, {
+        req,
+        actorId: actor.id,
+        workspaceId,
+      });
       return wrapToolResult(res);
     }
     case 'sprino.saved_view.create': {
@@ -956,12 +1004,6 @@ function wrapToolResult(payload: unknown): unknown {
     content: [{ type: 'text', text: JSON.stringify(payload) }],
     structuredContent: payload,
   };
-}
-
-class RpcMethodError extends Error {
-  constructor(public readonly code: number, message: string) {
-    super(message);
-  }
 }
 
 function rpcError(

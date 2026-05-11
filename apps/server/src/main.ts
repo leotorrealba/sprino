@@ -18,7 +18,7 @@
 
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { tokenAuth } from './auth/middleware.ts';
+import { mcpWorkspaceAuth, tokenAuth } from './auth/middleware.ts';
 import type { AuthEnv } from './auth/middleware.ts';
 import { db, closeDb } from './db/client.ts';
 import { seedFromEnv } from './db/seed.ts';
@@ -62,6 +62,7 @@ async function buildApp(): Promise<Hono<AuthEnv>> {
   // in design doc §Secrets & Auth).
   const mcp = new Hono<AuthEnv>();
   mcp.use('*', tokenAuth);
+  mcp.use('*', mcpWorkspaceAuth);
   mcp.route('/', buildMcpRoutes());
   app.route('/mcp', mcp);
 

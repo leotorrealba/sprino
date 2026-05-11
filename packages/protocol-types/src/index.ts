@@ -311,11 +311,23 @@ export type SavedView = z.infer<typeof SavedViewSchema>;
 export const WorkspaceSchema = z.object({
   id: uuid,
   name: z.string().min(1).max(100),
+  // Stored slugs may predate strict rules; create requests use WorkspaceCreateReqSchema.
   slug: z.string().min(1).max(50),
   created_by: uuid.nullable(),
   created_at: isoDateTime,
 });
 export type Workspace = z.infer<typeof WorkspaceSchema>;
+
+/** Matches server `WorkspaceCreateReqSchema` (domain). */
+export const WorkspaceCreateReqSchema = z.object({
+  name: z.string().min(1).max(100),
+  slug: z
+    .string()
+    .min(1)
+    .max(50)
+    .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
+});
+export type WorkspaceCreateReq = z.infer<typeof WorkspaceCreateReqSchema>;
 
 export const WorkspaceCreateResSchema = z.object({
   workspace: WorkspaceSchema,
@@ -334,6 +346,13 @@ export const WorkspaceMemberSchema = z.object({
   joined_at: isoDateTime,
 });
 export type WorkspaceMember = z.infer<typeof WorkspaceMemberSchema>;
+
+/** Matches server `WorkspaceMemberAddReqSchema` (domain). */
+export const WorkspaceMemberAddReqSchema = z.object({
+  actor_id: uuid,
+  role: z.enum(['admin', 'member']).optional(),
+});
+export type WorkspaceMemberAddReq = z.infer<typeof WorkspaceMemberAddReqSchema>;
 
 export const WorkspaceMemberListResSchema = z.object({
   members: z.array(WorkspaceMemberSchema),

@@ -11,9 +11,6 @@ import { asc, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { projects, workflowColumns, workflowTransitions } from '../db/schema.ts';
-
-/** Default workspace bootstrapped by migration 0012_workspaces.sql */
-export const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 import type { ProjectRow } from '../db/schema.ts';
 import type {
   Project,

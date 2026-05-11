@@ -23,7 +23,9 @@ export function WorkspaceSwitcher({ workspaceId, onWorkspaceChange, token }: Pro
         if (j?.workspaces) setWorkspaces(j.workspaces);
       })
       .catch((e) => {
-        if ((e as Error)?.name !== 'AbortError') {}
+        if ((e as Error)?.name !== 'AbortError') {
+          void 0; // non-abort fetch errors: keep list empty
+        }
       });
     return () => controller.abort();
   }, [token]);
