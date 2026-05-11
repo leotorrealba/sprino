@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { sql, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { v7 as uuidv7 } from 'uuid';
 
 import { db } from '../src/db/client.ts';
-import { workspacePlans, workspaces } from '../src/db/schema.ts';
+import { EntitlementLimitError } from '../src/domain/index.ts';
+import { actors, workspaceMembers, workspacePlans, workspaces } from '../src/db/schema.ts';
 import {
   FREE_PLAN_DEFAULTS,
   getWorkspacePlan,
 } from '../src/service/entitlements.ts';
+import { createProject } from '../src/service/projects.ts';
+import { addWorkspaceMember } from '../src/service/workspaces.ts';
 
 import { FIXTURE_WORKSPACE_ID, seedWorkspace } from './setup.ts';
 
@@ -79,5 +83,108 @@ describe('workspace entitlements', () => {
     );
     expect(defaultPlanRow?.plan).toBe('free');
     expect(defaultPlanRow?.auditExportEnabled).toBe(false);
+  });
+
+  it('createProject throws EntitlementLimitError when workspace is at max_projects', async () => {
+    const wsId = await seedWorkspace({ slug: 'gated-projects-ws' });
+    await db.insert(workspacePlans).values({
+      workspaceId: wsId,
+      plan: 'free',
+      maxProjects: 1,
+      maxMembers: 5,
+      auditExportEnabled: false,
+    });
+
+    const [actor] = await db.select().from(actors).limit(1);
+    await db.insert(workspaceMembers).values({
+      workspaceId: wsId,
+      actorId: actor!.id,
+      role: 'admin',
+    });
+
+    await createProject(db, {
+      req: {
+        operation_id: uuidv7(),
+        slug: 'proj-one',
+        display_name: 'Project One',
+      },
+      actorId: actor!.id,
+      workspaceId: wsId,
+    });
+
+    await expect(
+      createProject(db, {
+        req: {
+          operation_id: uuidv7(),
+          slug: 'proj-two',
+          display_name: 'Project Two',
+        },
+        actorId: actor!.id,
+        workspaceId: wsId,
+      }),
+    ).rejects.toThrow(EntitlementLimitError);
+  });
+
+  it('addWorkspaceMember throws EntitlementLimitError when workspace is at max_members', async () => {
+    const wsId = await seedWorkspace({ slug: 'gated-members-ws' });
+    await db.insert(workspacePlans).values({
+      workspaceId: wsId,
+      plan: 'free',
+      maxProjects: 3,
+      maxMembers: 1,
+      auditExportEnabled: false,
+    });
+
+    const [actor] = await db.select().from(actors).limit(1);
+    await db.insert(workspaceMembers).values({
+      workspaceId: wsId,
+      actorId: actor!.id,
+      role: 'admin',
+    });
+
+    const [actor2] = await db
+      .insert(actors)
+      .values({
+        id: uuidv7(),
+        kind: 'human',
+        displayName: 'Test Actor 2',
+      })
+      .returning();
+
+    await expect(
+      addWorkspaceMember(db, {
+        workspaceId: wsId,
+        req: { actor_id: actor2!.id, role: 'member' },
+        adminActorId: actor!.id,
+      }),
+    ).rejects.toThrow(EntitlementLimitError);
+  });
+
+  it('addWorkspaceMember allows role update for existing member even at max_members', async () => {
+    const wsId = await seedWorkspace({ slug: 'gated-members-upsert-ws' });
+    await db.insert(workspacePlans).values({
+      workspaceId: wsId,
+      plan: 'free',
+      maxProjects: 3,
+      maxMembers: 1,
+      auditExportEnabled: false,
+    });
+
+    const [actor] = await db.select().from(actors).limit(1);
+    // Solo membership must include admin rights so later addWorkspaceMember can run.
+    await db.insert(workspaceMembers).values({
+      workspaceId: wsId,
+      actorId: actor!.id,
+      role: 'admin',
+    });
+
+    // Updating an existing membership should not consume a new seat vs max_members.
+    await expect(
+      addWorkspaceMember(db, {
+        workspaceId: wsId,
+        req: { actor_id: actor!.id, role: 'member' },
+        adminActorId: actor!.id,
+      }),
+    ).resolves.toBeUndefined();
   });
 });

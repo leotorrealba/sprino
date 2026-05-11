@@ -881,3 +881,12 @@ export const WorkspacePlanSchema = z.object({
   updated_at: isoDateTime,
 });
 export type WorkspacePlan = z.infer<typeof WorkspacePlanSchema>;
+
+export class EntitlementLimitError extends Error {
+  constructor(resource: string, limit: number) {
+    super(
+      `Workspace has reached the ${resource} limit of ${limit} for its current plan`,
+    );
+    this.name = 'EntitlementLimitError';
+  }
+}

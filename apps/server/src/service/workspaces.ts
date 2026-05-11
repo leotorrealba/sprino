@@ -4,7 +4,7 @@
  * Workspace CRUD + membership management.
  */
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, count, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { actors, workspaces, workspaceMembers } from '../db/schema.ts';
@@ -18,7 +18,9 @@ import type {
   WorkspaceMemberAddReq,
   WorkspaceMemberListRes,
 } from '../domain/index.ts';
+import { EntitlementLimitError } from '../domain/index.ts';
 import { ActorNotFoundError } from './actors.ts';
+import { getWorkspacePlan } from './entitlements.ts';
 
 // ── Errors ───────────────────────────────────────────────────────────────
 
@@ -164,6 +166,31 @@ export async function addWorkspaceMember(
   }: { workspaceId: string; req: WorkspaceMemberAddReq; adminActorId: string },
 ): Promise<void> {
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
+
+  // Target is already a member (upsert path) — does not consume a new seat.
+  const [existing] = await db
+    .select({ actorId: workspaceMembers.actorId })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.actorId, req.actor_id),
+      ),
+    )
+    .limit(1);
+
+  // Only enforce max_members for net-new memberships
+  if (!existing) {
+    const plan = await getWorkspacePlan(db, workspaceId);
+    const [memberCountRow] = await db
+      .select({ count: count() })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.workspaceId, workspaceId));
+    const memberCount = memberCountRow?.count ?? 0;
+    if (Number(memberCount) >= plan.max_members) {
+      throw new EntitlementLimitError('members', plan.max_members);
+    }
+  }
 
   // Verify target actor exists
   const [target] = await db
