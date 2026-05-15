@@ -171,7 +171,7 @@ All existing resource routes (`/api/projects`, `/api/tasks`, etc.) automatically
 
 | Error | Status |
 |-------|--------|
-| `WorkspaceNotFoundError` | 404 |
+| `WorkspaceNotFoundError` | 403 (`workspace_not_found_or_not_member` — hides existence from non-members) |
 | `WorkspaceIsolationError` | 403 |
 
 ---

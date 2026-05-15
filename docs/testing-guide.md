@@ -88,7 +88,7 @@ Expected output:
 **Verify both are up:**
 ```bash
 curl http://localhost:3001/healthz
-# → {"ok":true,"version":"0.0.9","protocol":"tessera/v0.1.2"}
+# → {"ok":true,"version":"0.0.9","protocol":"tessera/v0.1.5"}
 
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/
 # → 200
