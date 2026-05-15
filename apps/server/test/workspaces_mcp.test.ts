@@ -277,6 +277,19 @@ describe('MCP sprino.workspace.create', () => {
     expect(body.error!.code).toBe(-32009);
     expect(body.error!.message).toBe('slug_conflict');
   });
+
+  it('invalid slug pattern → invalid_params error', async () => {
+    const app = buildTestApp();
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.workspace.create', { name: 'Acme', slug: 'UPPER_CASE' }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32602);
+  });
 });
 
 describe('MCP sprino.workspace.member.list', () => {

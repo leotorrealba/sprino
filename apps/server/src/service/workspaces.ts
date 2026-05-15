@@ -225,8 +225,19 @@ export async function removeWorkspaceMember(
 ): Promise<void> {
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
 
-  // Guard against removing the last admin when self-removing
-  if (adminActorId === actorId) {
+  // Guard against removing the last admin (regardless of who is calling)
+  const [targetMembership] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.actorId, actorId),
+      ),
+    )
+    .limit(1);
+
+  if (targetMembership?.role === 'admin') {
     const admins = await db
       .select({ actorId: workspaceMembers.actorId })
       .from(workspaceMembers)
