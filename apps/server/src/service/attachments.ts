@@ -63,6 +63,13 @@ export class AttachmentNotReadyError extends Error {
   }
 }
 
+export class AttachmentAlreadyFinalizedError extends Error {
+  constructor(public readonly attachmentId: string) {
+    super(`attachment ${attachmentId}: upload slot is already claimed or finalized`);
+    this.name = 'AttachmentAlreadyFinalizedError';
+  }
+}
+
 export class AttachmentTaskNotFoundError extends Error {
   constructor(public readonly taskId: string) {
     super(`task ${taskId} not found`);
@@ -150,6 +157,44 @@ export async function createUpload(
     if (raced !== null) return raced as AttachmentCreateUploadRes;
     throw err;
   }
+}
+
+/**
+ * attachment.upload_bytes — write the binary payload for a pending slot.
+ * Acquires a row-level lock (SELECT … FOR UPDATE SKIP LOCKED) so that two
+ * concurrent uploads to the same slot cannot both succeed: one wins (204),
+ * the other is rejected instantly with AttachmentAlreadyFinalizedError (409).
+ */
+export async function uploadBytes(
+  db: Db,
+  storage: StorageBackend,
+  { attachmentId, data }: { attachmentId: string; data: Buffer },
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    // SKIP LOCKED: if another request holds the lock, return 0 rows immediately.
+    const rows = await tx
+      .select({ status: attachments.status })
+      .from(attachments)
+      .where(eq(attachments.id, attachmentId))
+      .for('update', { skipLocked: true });
+
+    if (rows.length === 0) {
+      // Either the slot doesn't exist or it's locked by a concurrent upload.
+      const check = await tx
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.id, attachmentId))
+        .limit(1);
+      if (check.length === 0) throw new AttachmentNotFoundError(attachmentId);
+      throw new AttachmentAlreadyFinalizedError(attachmentId);
+    }
+
+    if (rows[0].status !== 'pending') {
+      throw new AttachmentAlreadyFinalizedError(attachmentId);
+    }
+
+    await storage.write(attachmentId, data);
+  });
 }
 
 /**
