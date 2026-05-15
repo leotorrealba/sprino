@@ -376,6 +376,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   ws.get('/tasks', async (c) => {
     try {
       const statusParam = c.req.queries('status') ?? [];
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
       const req = TaskListReqSchema.parse({
         project_id: c.req.query('project_id'),
         status: statusParam.length > 0 ? statusParam : undefined,
@@ -383,8 +384,8 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         parent_task_id: c.req.query('parent_task_id') ?? undefined,
         title_contains: c.req.query('title_contains') ?? undefined,
         sprint_id: c.req.query('sprint_id') ?? undefined,
-        limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
-        offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
+        limit,
+        offset,
       });
       const res = await listTasks(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
       return c.json(res, 200);
@@ -1205,16 +1206,21 @@ function actorErrorResponse(c: any, err: unknown): Response {
 function parseLimitOffset(
   q: (key: string) => string | undefined,
 ): { limit: number | undefined; offset: number | undefined } {
-  const parseIntParam = (v: string | undefined): number | undefined => {
+  const parseIntParam = (key: string): number | undefined => {
+    const v = q(key);
     if (v === undefined || v === '') return undefined;
-    if (!/^-?\d+$/.test(v)) return undefined;
-    const n = Number(v);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return undefined;
-    return n;
+    if (!/^\d+$/.test(v)) {
+      throw new ZodError([{
+        code: 'custom' as const,
+        path: [key],
+        message: `${key} must be a non-negative integer`,
+      }]);
+    }
+    return Number(v);
   };
   return {
-    limit: parseIntParam(q('limit')),
-    offset: parseIntParam(q('offset')),
+    limit: parseIntParam('limit'),
+    offset: parseIntParam('offset'),
   };
 }
 
