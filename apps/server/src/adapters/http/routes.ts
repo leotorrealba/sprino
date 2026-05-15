@@ -32,6 +32,7 @@ import {
   AttachmentCreateUploadReqSchema,
   AttachmentFinalizeReqSchema,
   AttachmentListReqSchema,
+  EventKindSchema,
   EventListReqSchema,
   ProjectCreateReqSchema,
   ProjectGetReqSchema,
@@ -82,6 +83,7 @@ import {
   getProject,
   listProjects,
 } from '../../service/projects.ts';
+import { exportAuditEvents } from '../../service/audit-export.ts';
 import { listEvents } from '../../service/events.ts';
 import { listAgents } from '../../service/agents.ts';
 import {
@@ -174,7 +176,7 @@ import {
   IdempotencyConflictError,
   OperationExpiredError,
 } from '../../service/idempotency.ts';
-import { ZodError } from 'zod';
+import { ZodError, z } from 'zod';
 
 export function buildHttpRoutes(): Hono<AuthEnv> {
   const api = new Hono<AuthEnv>();
@@ -581,6 +583,85 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       }
       const res = await listEvents(c.get('db'), { req });
       return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  const AuditExportQuerySchema = z.object({
+    actorId: z.string().uuid().optional(),
+    kind: EventKindSchema.optional(),
+    since: z.string().datetime({ offset: true }).optional(),
+    until: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+  });
+
+  function csvEscapeCell(value: string): string {
+    if (/[",\n\r]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  }
+
+  ws.get('/audit/export', async (c) => {
+    try {
+      const q = AuditExportQuerySchema.parse({
+        actorId: c.req.query('actorId'),
+        kind: c.req.query('kind'),
+        since: c.req.query('since'),
+        until: c.req.query('until'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = await exportAuditEvents(c.get('db'), {
+        workspaceId: c.get('workspace')!.id,
+        actorId: q.actorId,
+        kind: q.kind,
+        since: q.since,
+        until: q.until,
+        limit: q.limit,
+        offset: q.offset,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/audit/export/csv', async (c) => {
+    try {
+      const q = AuditExportQuerySchema.parse({
+        actorId: c.req.query('actorId'),
+        kind: c.req.query('kind'),
+        since: c.req.query('since'),
+        until: c.req.query('until'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = await exportAuditEvents(c.get('db'), {
+        workspaceId: c.get('workspace')!.id,
+        actorId: q.actorId,
+        kind: q.kind,
+        since: q.since,
+        until: q.until,
+        limit: q.limit,
+        offset: q.offset,
+      });
+      const header = 'id,task_id,actor_id,kind,created_at,workspace_id';
+      const lines = res.events.map((e) =>
+        [
+          csvEscapeCell(e.id),
+          csvEscapeCell(e.task_id),
+          csvEscapeCell(e.actor_id),
+          csvEscapeCell(e.kind),
+          csvEscapeCell(e.created_at),
+          csvEscapeCell(e.workspace_id),
+        ].join(','),
+      );
+      const body = [header, ...lines].join('\n');
+      c.header('Content-Type', 'text/csv; charset=utf-8');
+      return c.body(body, 200);
     } catch (err) {
       return errorResponse(c, err);
     }

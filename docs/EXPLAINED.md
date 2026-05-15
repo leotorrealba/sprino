@@ -117,18 +117,42 @@ Setting expectations:
 - **Not Jira.** No epics, no story points, no swimlane configurations,
   no permissions matrix, no workflow builder. Sprino has tasks, status,
   assignees, and an event log. That's it.
-- **Not multi-tenant yet.** One Sprino install = one team. Multi-team
-  cloud is planned for v0.2.
+- **Multi-workspace on your own server, not a shared SaaS.** One Sprino
+  install can host **several workspaces** (separate teams or divisions)
+  with isolated projects and audit data. What you don’t get yet is a
+  hosted “Sprino Cloud” where strangers sign up side by side — that’s
+  still planned for a later release.
 - **Not a finished product.** Pre-alpha. Working code, exercised daily
   by the maintainer, but not battle-tested across hundreds of teams.
+
+## What's new: workspaces and audit logs
+
+**Workspaces** are separate buckets inside your Sprino install — think “two
+teams, one server.” Each workspace has its own projects and tasks; the web
+UI includes a switcher so you pick which workspace you’re working in before
+you create or browse work. People only see what their membership allows.
+
+**Audit export** is for compliance and review: everything that happened in a
+workspace can be downloaded as machine-readable output. The HTTP API offers
+**JSON** (full event records, including payloads) or a **CSV** snapshot with
+the main columns for the append-only trail (ids, times, kinds,
+`workspace_id`, etc.). That’s useful for dropping into a spreadsheet,
+attaching to a ticket, or feeding offline tools — and you can page through
+long histories using `offset` if you hit the per-request row limit.
+
+**Security, in one sentence:** only actors who belong to that workspace can
+export its events — the server never trusts “which workspace” from untrusted
+query tricks; it always scopes to the workspace the caller is authenticated
+into (including the `X-Workspace-ID` header when you use more than one).
 
 ## What's the catch?
 
 Honest list:
 
 - It's pre-alpha. Bugs exist. The README and CHANGELOG say what works.
-- Single-tenant only right now. If you need multi-team isolation,
-  wait for v0.2.
+- If you need **hosted** multi-tenant SaaS (tenants you don’t run yourself),
+  that’s still on the roadmap — today you self-host and use workspaces
+  for team boundaries on your own infrastructure.
 - Self-hosted means *you* run it. If your VPS dies, your tasks die
   with it (unless you set up the backup sidecar — which is included
   and tested, but you have to opt in to the `full` profile).

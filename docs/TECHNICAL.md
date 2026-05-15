@@ -451,6 +451,104 @@ responses and MCP actor responses for absence of `lifecycle_state`,
 
 ---
 
+## 10d. Multi-workspace tenancy (E1)
+
+Sprino isolates data per **workspace**: each project belongs to exactly one
+workspace, and every workspace-scoped HTTP route runs only after the server
+has resolved which workspace the caller is acting in.
+
+**Schema.**
+
+- `workspaces` — id, name, slug, metadata; one row per logical team/tenant
+  slice inside a single install.
+- `workspace_members` — composite primary key `(workspace_id, actor_id)` with
+  a role (`admin` | `member`). Membership is what grants access.
+- `projects.workspace_id` — foreign key to `workspaces.id`. All tasks and
+  (via tasks) events are ultimately scoped through the project’s workspace.
+
+**HTTP: `workspaceAuth` (after `tokenAuth`).** Implemented in
+`apps/server/src/auth/middleware.ts`. Routes that need workspace context are
+registered on the workspace sub-router in `apps/server/src/adapters/http/routes.ts`,
+which applies `workspaceAuth` to every path under it.
+
+- If the client sends **`X-Workspace-ID`**, the server resolves that UUID,
+  verifies the authenticated actor is a member, and sets `c.var.workspace`.
+  If the header is present but the actor is not a member → `403`.
+- If the header is **absent**, the server may **auto-select** the workspace
+  when the actor belongs to exactly one workspace. Otherwise → `400`
+  `workspace_id_required` (so ambiguous multi-workspace callers must send
+  the header).
+
+**Frontend.** The web app includes a **workspace switcher** so humans pick
+the active workspace; the client sends `X-Workspace-ID` on API requests that
+hit the workspace-scoped router. Same header pattern applies to scripts and
+integrations using bearer tokens.
+
+**Bootstrap.** On first deploy, migrations and `ensureDefaultWorkspace` (see
+`apps/server/src/db/migrate.ts`) create a **default** workspace row and tie
+the seeded project (and env actors) to it. Additional workspaces are created
+via `POST /api/workspaces` (bypass router — no workspace context yet) and
+membership is managed per workspace.
+
+---
+
+## 10e. Audit governance (E2)
+
+**`workspace_id` on events (E2-P1).** `EventWithActor` includes a top-level
+`workspace_id` (UUID). It is **not** duplicated inside the append-only
+`payload` jsonb — it is **derived in SQL** by joining
+`events → tasks → projects` and selecting `projects.workspace_id`. Both
+`listEvents` and audit export use this join so the wire shape stays
+consistent.
+
+**`listEvents`.** Service: `listEvents(db, { req: EventListReq })` in
+`apps/server/src/service/events.ts`. Returns `{ events: EventWithActor[] }`
+with `workspace_id` on each event. The HTTP surface is **`GET /api/events`**
+(query: `project_id`, optional `task_id`, `limit`, `offset`) on the
+workspace-scoped router — callers must therefore send Bearer auth plus
+workspace resolution (`X-Workspace-ID` or eligible auto-select), and the
+service checks the project belongs to that workspace before listing.
+
+**`exportAuditEvents` (E2-P2).** Service:
+`exportAuditEvents(db, opts)` in `apps/server/src/service/audit-export.ts`:
+
+- **Required:** `workspaceId` (string UUID).
+- **Optional filters:** `actorId`, `kind`, `since`, `until` (ISO datetimes),
+  `limit`, `offset`.
+- **Limits:** default page size **100**; maximum **500** per request
+  (`Math.min(opts.limit ?? 100, 500)`).
+- **Returns:** `{ events: EventWithActor[]; total: number }` where `total` is
+  the count matching filters (not truncated by `limit`), suitable for
+  pagination.
+
+**HTTP (workspace in context, not in path).** Audit export lives on the same
+workspace-scoped router as `/api/events`. Workspace id is **never** taken from
+unchecked client query params for scoping — it always comes from
+`c.get('workspace').id` after `workspaceAuth`:
+
+- **`GET /api/audit/export`** — JSON body `{ events, total }`; query parameters
+  only filter **which** events (`actorId`, `kind`, `since`, `until`, `limit`,
+  `offset`).
+- **`GET /api/audit/export/csv`** — `Content-Type: text/csv`. One header row:
+  `id`, `task_id`, `actor_id`, `kind`, `created_at`, `workspace_id` (event
+  metadata suitable for SIEM or spreadsheet ingestion; use the JSON export
+  when you need full `payload`).
+
+**MCP.** Tool name **`audit.export`** — same filter set and same `{ events,
+total }` shape as the JSON HTTP endpoint; workspace is tied to the
+authenticated session’s resolved workspace (see MCP adapter in
+`apps/server/src/adapters/mcp/server.ts`).
+
+**Isolation.** All export queries constrain rows by `projects.workspace_id =
+opts.workspaceId`. Combined with membership checks at the adapter boundary,
+only actors who belong to the workspace can obtain its audit stream.
+
+**Operator note.** Use `offset` with repeated calls to walk large histories.
+CSV is optimized for bulk archival; default `limit` 100 keeps bursts small on
+shared servers.
+
+---
+
 ## 11. Where to go next
 
 - New to the project? Read [`docs/EXPLAINED.md`](./EXPLAINED.md).
