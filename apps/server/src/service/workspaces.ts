@@ -168,8 +168,9 @@ export async function addWorkspaceMember(
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
 
   // Target is already a member (upsert path) — does not consume a new seat.
+  // Also fetch role here to reuse in the last-admin guard below, avoiding a second query.
   const [existing] = await db
-    .select({ actorId: workspaceMembers.actorId })
+    .select({ actorId: workspaceMembers.actorId, role: workspaceMembers.role })
     .from(workspaceMembers)
     .where(
       and(
@@ -202,18 +203,9 @@ export async function addWorkspaceMember(
 
   // Guard: if target is currently admin and effective new role is 'member', check they're not the last admin
   // req.role ?? 'member' mirrors the upsert default, so omitting role also triggers the guard
+  // existing.role is already fetched above — no second query needed
   if ((req.role ?? 'member') === 'member') {
-    const [currentMembership] = await db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, workspaceId),
-          eq(workspaceMembers.actorId, req.actor_id),
-        ),
-      )
-      .limit(1);
-    if (currentMembership?.role === 'admin') {
+    if (existing?.role === 'admin') {
       const adminRows = await db
         .select({ actorId: workspaceMembers.actorId })
         .from(workspaceMembers)

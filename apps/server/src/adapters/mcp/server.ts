@@ -970,8 +970,6 @@ async function callTool(
     }
     case 'sprino.workspace.get': {
       const { workspace_id } = z.object({ workspace_id: z.string().uuid() }).parse(args);
-      const resolved = await resolveWorkspaceById(db, { workspaceId: workspace_id, actorId: actor.id });
-      if (!resolved) throw new RpcMethodError(-32003, 'workspace_not_found_or_not_member');
       const { workspaces: all } = await listWorkspacesForActor(db, actor.id);
       const ws = all.find((w) => w.id === workspace_id);
       if (!ws) throw new RpcMethodError(-32003, 'workspace_not_found_or_not_member');
