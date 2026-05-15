@@ -11,6 +11,9 @@ import { asc, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { projects, workflowColumns, workflowTransitions } from '../db/schema.ts';
+
+/** Default workspace bootstrapped by migration 0012_workspaces.sql */
+export const DEFAULT_WORKSPACE_ID = '00000000-0000-7000-8000-000000000001';
 import type { ProjectRow } from '../db/schema.ts';
 import type {
   Project,
@@ -25,6 +28,7 @@ import {
   hashRequest,
   recordOperation,
 } from './idempotency.ts';
+import { assertProjectInWorkspace } from './authorization.ts';
 
 type ProjectLookupRef = {
   project_id?: string | null;
@@ -122,10 +126,14 @@ function repoMapProjectId(repoPath: string): string | null {
   return null;
 }
 
-export async function listProjects(db: Db): Promise<ProjectListRes> {
+export async function listProjects(
+  db: Db,
+  { workspaceId }: { workspaceId: string },
+): Promise<ProjectListRes> {
   const rows = await db
     .select()
     .from(projects)
+    .where(eq(projects.workspaceId, workspaceId))
     .orderBy(asc(projects.slug));
 
   return { projects: rows.map(rowToProject) };
@@ -176,14 +184,14 @@ export async function resolveProject(
 
 export async function getProject(
   db: Db,
-  args: { req: ProjectGetReq },
+  args: { req: ProjectGetReq; workspaceId: string },
 ): Promise<ProjectGetRes> {
   const row = await resolveProject(db, {
     project_id: args.req.project_id,
     slug: args.req.slug,
     repo_path: args.req.repo_path,
   });
-
+  await assertProjectInWorkspace(db, { projectId: row.id, workspaceId: args.workspaceId });
   return { project: rowToProject(row) };
 }
 
@@ -193,7 +201,7 @@ export async function getProject(
  */
 export async function createProject(
   db: Db,
-  { req, actorId }: { req: ProjectCreateReq; actorId: string },
+  { req, actorId, workspaceId }: { req: ProjectCreateReq; actorId: string; workspaceId: string },
 ): Promise<ProjectCreateRes> {
   const requestHash = hashRequest(req);
   const cached = await checkIdempotency(db, req.operation_id, requestHash);
@@ -216,6 +224,7 @@ export async function createProject(
         slug: req.slug,
         displayName: req.display_name,
         repoPath: req.repo_path ?? null,
+        workspaceId,
       });
 
       // Seed the four default workflow columns for this new project.

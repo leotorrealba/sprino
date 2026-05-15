@@ -30,7 +30,7 @@
  *  └──────────────────┘
  */
 
-import { and, desc, eq, asc, inArray, sql, ilike } from 'drizzle-orm';
+import { and, desc, eq, asc, inArray, ne, sql, ilike } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
@@ -72,6 +72,7 @@ import {
 } from './idempotency.ts';
 import { resolveProject } from './projects.ts';
 import { applyAutomationRules } from './automation.ts';
+import { assertProjectInWorkspace } from './authorization.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -361,7 +362,7 @@ export async function listRelatedTasks(
 
 export async function createTask(
   db: Db,
-  args: { req: TaskCreateReq; actorId: string },
+  args: { req: TaskCreateReq; actorId: string; workspaceId: string },
 ): Promise<TaskCreateRes> {
   const requestHash = hashRequest(args.req);
 
@@ -372,6 +373,8 @@ export async function createTask(
     project_id: args.req.project_id,
     repo_path: args.req.repo_path,
   });
+
+  await assertProjectInWorkspace(db, { projectId: project.id, workspaceId: args.workspaceId });
 
   const taskId = uuidv7();
   const eventId = uuidv7();
@@ -469,8 +472,10 @@ export async function createTask(
  */
 export async function listTasks(
   db: Db,
-  args: { req: TaskListReq },
+  args: { req: TaskListReq; workspaceId: string },
 ): Promise<TaskListRes> {
+  await assertProjectInWorkspace(db, { projectId: args.req.project_id, workspaceId: args.workspaceId });
+
   const limit = args.req.limit ?? DEFAULT_LIMIT;
   const offset = args.req.offset ?? 0;
 
@@ -507,11 +512,13 @@ export async function listTasks(
 
 export async function getTask(
   db: Db,
-  args: { req: TaskGetReq },
+  args: { req: TaskGetReq; workspaceId: string },
 ): Promise<TaskGetRes> {
   const rows = await db.select().from(tasks).where(eq(tasks.id, args.req.task_id));
   const row = rows[0];
   if (!row) throw new TaskNotFoundError(args.req.task_id);
+
+  await assertProjectInWorkspace(db, { projectId: row.projectId, workspaceId: args.workspaceId });
 
   const agentContext = await buildAgentContext(db, args.req.task_id);
 
@@ -523,7 +530,7 @@ export async function getTask(
 
 export async function updateTaskStatus(
   db: Db,
-  args: { req: TaskUpdateStatusReq; actorId: string },
+  args: { req: TaskUpdateStatusReq; actorId: string; workspaceId: string },
 ): Promise<TaskUpdateStatusRes> {
   const requestHash = hashRequest(args.req);
 
@@ -545,36 +552,12 @@ export async function updateTaskStatus(
       const current = rows[0];
 
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }
 
-      if (args.req.status === 'doing' || args.req.status === 'done') {
-        const unresolvedDeps = await tx
-          .select({ id: taskDependencies.toTaskId })
-          .from(taskDependencies)
-          .innerJoin(tasks, eq(tasks.id, taskDependencies.toTaskId))
-          .where(
-            and(
-              eq(taskDependencies.fromTaskId, args.req.task_id),
-              sql`${tasks.status} != 'done'`,
-            ),
-          );
-        if (unresolvedDeps.length > 0) throw new DependencyNotResolvedError();
-      }
-
-      if (args.req.status === 'done') {
-        const undoneChildren = await tx
-          .select({ id: tasks.id })
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.parentTaskId, args.req.task_id),
-              sql`${tasks.status} != 'done'`,
-            ),
-          );
-        if (undoneChildren.length > 0) throw new ChildrenNotDoneError();
-      }
+      await validateStatusTransition(tx, args.req.task_id, args.req.status);
 
       const previousStatus: TaskStatus = current.status;
 
@@ -673,9 +656,42 @@ export async function listWorkflowColumns(
   };
 }
 
+async function validateStatusTransition(
+  db: SelectClient,
+  taskId: string,
+  newStatus: TaskStatus,
+): Promise<void> {
+  if (newStatus === 'doing' || newStatus === 'done') {
+    const unresolvedDeps = await db
+      .select({ id: taskDependencies.toTaskId })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.toTaskId))
+      .where(
+        and(
+          eq(taskDependencies.fromTaskId, taskId),
+          sql`${tasks.status} != 'done'`,
+        ),
+      );
+    if (unresolvedDeps.length > 0) throw new DependencyNotResolvedError();
+  }
+
+  if (newStatus === 'done') {
+    const undoneChildren = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.parentTaskId, taskId),
+          sql`${tasks.status} != 'done'`,
+        ),
+      );
+    if (undoneChildren.length > 0) throw new ChildrenNotDoneError();
+  }
+}
+
 export async function transitionTaskWorkflow(
   db: Db,
-  args: { req: TaskTransitionWorkflowReq; actorId: string },
+  args: { req: TaskTransitionWorkflowReq; actorId: string; workspaceId: string },
 ): Promise<TaskTransitionWorkflowRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -694,6 +710,7 @@ export async function transitionTaskWorkflow(
         .for('update');
       const current = taskRows[0];
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }
@@ -713,6 +730,8 @@ export async function transitionTaskWorkflow(
       if (!targetCol) {
         throw new WorkflowColumnNotFoundError(args.req.to_column_id);
       }
+
+      await validateStatusTransition(tx, args.req.task_id, targetCol.mapsToStatus);
 
       const maxRankRow = await tx
         .select({ maxRank: sql<number>`COALESCE(MAX(rank), 0)` })
@@ -809,7 +828,7 @@ export async function transitionTaskWorkflow(
 
 export async function reorderTask(
   db: Db,
-  args: { req: TaskReorderReq; actorId: string },
+  args: { req: TaskReorderReq; actorId: string; workspaceId: string },
 ): Promise<TaskReorderRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -825,6 +844,7 @@ export async function reorderTask(
         .for('update');
       const target = taskRows[0];
       if (!target) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: target.projectId, workspaceId: args.workspaceId });
       if (target.workflowColumnId !== args.req.column_id) {
         throw new TaskNotInColumnError(args.req.task_id, args.req.column_id);
       }
@@ -893,6 +913,9 @@ export async function reorderTask(
 
 // ── D3: Graph helpers ─────────────────────────────────────────────────────
 
+/** Maximum number of levels from root to leaf (root = level 1). */
+const MAX_TASK_HIERARCHY_DEPTH = 3;
+
 async function walkAncestors(
   db: SelectClient,
   startId: string,
@@ -911,6 +934,20 @@ async function walkAncestors(
     currentId = parentId;
   }
   return ancestors;
+}
+
+/** Maximum edge-count from `taskId` down to any descendant (0 if no children). */
+async function walkDescendants(db: SelectClient, taskId: string): Promise<number> {
+  const childRows = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.parentTaskId, taskId));
+  let maxDown = 0;
+  for (const row of childRows) {
+    const down = await walkDescendants(db, row.id);
+    maxDown = Math.max(maxDown, 1 + down);
+  }
+  return maxDown;
 }
 
 async function isReachableInDependencies(
@@ -936,49 +973,55 @@ async function isReachableInDependencies(
 
 export async function setParent(
   db: Db,
-  args: { taskId: string; parentTaskId: string | null; actorId: string },
+  args: { taskId: string; parentTaskId: string | null; actorId: string; workspaceId: string },
 ): Promise<SetParentRes> {
   const now = new Date();
 
-  const taskRows = await db.select().from(tasks).where(eq(tasks.id, args.taskId));
-  const current = taskRows[0];
-  if (!current) throw new TaskNotFoundError(args.taskId);
+  return await db.transaction(async (tx) => {
+    const taskRows = await tx.select().from(tasks).where(eq(tasks.id, args.taskId));
+    const current = taskRows[0];
+    if (!current) throw new TaskNotFoundError(args.taskId);
+    await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
 
-  if (args.parentTaskId !== null) {
-    const parentRows = await db.select().from(tasks).where(eq(tasks.id, args.parentTaskId));
-    const parent = parentRows[0];
-    if (!parent) throw new TaskNotFoundError(args.parentTaskId);
-    if (parent.projectId !== current.projectId) throw new CrossProjectRelationError();
+    if (args.parentTaskId !== null) {
+      const parentRows = await tx.select().from(tasks).where(eq(tasks.id, args.parentTaskId));
+      const parent = parentRows[0];
+      if (!parent) throw new TaskNotFoundError(args.parentTaskId);
+      if (parent.projectId !== current.projectId) throw new CrossProjectRelationError();
 
-    const ancestors = await walkAncestors(db, args.parentTaskId);
-    if (ancestors.includes(args.taskId)) throw new ParentCycleDetectedError();
-    if (ancestors.length >= 2) throw new HierarchyDepthExceededError();
-  }
+      const ancestors = await walkAncestors(tx, args.parentTaskId);
+      if (ancestors.includes(args.taskId)) throw new ParentCycleDetectedError();
+      const maxDescendantDepth = await walkDescendants(tx, args.taskId);
+      if (ancestors.length + 1 + maxDescendantDepth >= MAX_TASK_HIERARCHY_DEPTH) {
+        throw new HierarchyDepthExceededError();
+      }
+    }
 
-  const prevParentId = current.parentTaskId;
+    const prevParentId = current.parentTaskId;
 
-  const [updated] = await db
-    .update(tasks)
-    .set({ parentTaskId: args.parentTaskId, updatedAt: now })
-    .where(eq(tasks.id, args.taskId))
-    .returning();
+    const [updated] = await tx
+      .update(tasks)
+      .set({ parentTaskId: args.parentTaskId, updatedAt: now })
+      .where(eq(tasks.id, args.taskId))
+      .returning();
 
-  await db.insert(events).values({
-    id: uuidv7(),
-    taskId: args.taskId,
-    actorId: args.actorId,
-    kind: 'context_updated',
-    payload: { field: 'parent_task_id', old: prevParentId, new: args.parentTaskId },
-    operationId: uuidv7(),
-    createdAt: now,
+    await tx.insert(events).values({
+      id: uuidv7(),
+      taskId: args.taskId,
+      actorId: args.actorId,
+      kind: 'context_updated',
+      payload: { field: 'parent_task_id', old: prevParentId, new: args.parentTaskId },
+      operationId: uuidv7(),
+      createdAt: now,
+    });
+
+    return { task: rowToTask(updated!) };
   });
-
-  return { task: rowToTask(updated!) };
 }
 
 export async function addDependency(
   db: Db,
-  args: { fromTaskId: string; toTaskId: string; actorId: string },
+  args: { fromTaskId: string; toTaskId: string; actorId: string; workspaceId: string },
 ): Promise<AddDependencyRes> {
   const now = new Date();
 
@@ -991,6 +1034,7 @@ export async function addDependency(
   if (!fromTask) throw new TaskNotFoundError(args.fromTaskId);
   if (!toTask) throw new TaskNotFoundError(args.toTaskId);
   if (fromTask.projectId !== toTask.projectId) throw new CrossProjectRelationError();
+  await assertProjectInWorkspace(db, { projectId: fromTask.projectId, workspaceId: args.workspaceId });
 
   const wouldCycle = await isReachableInDependencies(db, args.toTaskId, args.fromTaskId);
   if (wouldCycle) throw new DependencyCycleDetectedError();
@@ -1025,31 +1069,75 @@ export async function addDependency(
 
 export async function removeDependency(
   db: Db,
-  args: { fromTaskId: string; toTaskId: string; actorId: string },
+  args: { fromTaskId: string; toTaskId: string; actorId: string; workspaceId: string },
 ): Promise<void> {
   const now = new Date();
 
-  await db
-    .delete(taskDependencies)
-    .where(
-      and(
-        eq(taskDependencies.fromTaskId, args.fromTaskId),
-        eq(taskDependencies.toTaskId, args.toTaskId),
-      ),
-    );
+  await db.transaction(async (tx) => {
+    const lockedRows = await tx
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, args.fromTaskId))
+      .for('update');
+    const fromTask = lockedRows[0];
+    if (!fromTask) throw new TaskNotFoundError(args.fromTaskId);
+    await assertProjectInWorkspace(tx, {
+      projectId: fromTask.projectId,
+      workspaceId: args.workspaceId,
+    });
 
-  const taskRows = await db.select().from(tasks).where(eq(tasks.id, args.fromTaskId));
-  const task = taskRows[0];
-  if (!task) return;
+    await tx
+      .delete(taskDependencies)
+      .where(
+        and(
+          eq(taskDependencies.fromTaskId, args.fromTaskId),
+          eq(taskDependencies.toTaskId, args.toTaskId),
+        ),
+      );
 
-  await db.insert(events).values({
-    id: uuidv7(),
-    taskId: args.fromTaskId,
-    actorId: args.actorId,
-    kind: 'context_updated',
-    payload: { field: 'dependency_removed', blocked_by_task_id: args.toTaskId },
-    operationId: uuidv7(),
-    createdAt: now,
+    if (fromTask.status === 'blocked') {
+      const unresolved = await tx
+        .select({ toTaskId: taskDependencies.toTaskId })
+        .from(taskDependencies)
+        .innerJoin(tasks, eq(taskDependencies.toTaskId, tasks.id))
+        .where(
+          and(
+            eq(taskDependencies.fromTaskId, args.fromTaskId),
+            ne(tasks.status, 'done'),
+          ),
+        );
+
+      if (unresolved.length === 0) {
+        await tx.insert(events).values({
+          id: uuidv7(),
+          taskId: args.fromTaskId,
+          actorId: args.actorId,
+          kind: 'status_changed',
+          payload: { from: 'blocked', to: 'todo' },
+          operationId: uuidv7(),
+          createdAt: now,
+        });
+
+        await tx
+          .update(tasks)
+          .set({
+            status: 'todo',
+            version: fromTask.version + 1,
+            updatedAt: now,
+          })
+          .where(eq(tasks.id, args.fromTaskId));
+      }
+    }
+
+    await tx.insert(events).values({
+      id: uuidv7(),
+      taskId: args.fromTaskId,
+      actorId: args.actorId,
+      kind: 'context_updated',
+      payload: { field: 'dependency_removed', blocked_by_task_id: args.toTaskId },
+      operationId: uuidv7(),
+      createdAt: now,
+    });
   });
 }
 
@@ -1075,7 +1163,7 @@ export async function listDependencies(
 
 export async function updateTaskPoints(
   db: Db,
-  args: { req: UpdateTaskPointsReq; actorId: string },
+  args: { req: UpdateTaskPointsReq; actorId: string; workspaceId: string },
 ): Promise<UpdateTaskPointsRes> {
   const requestHash = hashRequest(args.req);
   const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
@@ -1093,6 +1181,7 @@ export async function updateTaskPoints(
         .for('update');
       const current = rows[0];
       if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
       if (current.version !== args.req.if_match) {
         throw new VersionMismatchError(rowToTask(current));
       }

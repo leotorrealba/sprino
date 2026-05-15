@@ -14,9 +14,12 @@ import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
 import { afterAll, describe, expect, it } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
+import { eq } from 'drizzle-orm';
 import { db } from '../src/db/client.ts';
+import { attachments } from '../src/db/schema.ts';
 import { LocalStorageBackend } from '../src/service/attachments/local-storage.ts';
 import {
+  AttachmentAlreadyFinalizedError,
   AttachmentNotFoundError,
   AttachmentNotReadyError,
   AttachmentTaskNotFoundError,
@@ -24,6 +27,7 @@ import {
   finalize,
   getAttachment,
   listAttachments,
+  uploadBytes,
 } from '../src/service/attachments.ts';
 import {
   FIXTURE_ACTOR_ID,
@@ -227,6 +231,41 @@ describe('attachment service (C3-P1)', () => {
     // Both ready.
     expect(res.attachments.every((a) => a.status === 'ready')).toBe(true);
     void task2;
+  });
+
+  it('uploadBytes rejects with AttachmentAlreadyFinalizedError when row is locked by a concurrent upload', async () => {
+    await seedFixtureTask();
+    const { attachment } = await createUpload(db, storage, {
+      req: makeCreateReq({ filename: 'locked.pdf' }),
+      actorId: FIXTURE_ACTOR_ID,
+    });
+
+    // Simulate a concurrent upload in progress by holding a row lock.
+    const lockAcquired = { resolve: () => {} };
+    const lockAcquiredPromise = new Promise<void>((res) => {
+      lockAcquired.resolve = res;
+    });
+
+    const lockHolder = db.transaction(async (tx) => {
+      await tx
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.id, attachment.id))
+        .for('update')
+        .limit(1);
+      lockAcquired.resolve();
+      // Hold the lock long enough for the competing upload to try and fail.
+      await new Promise<void>((r) => setTimeout(r, 300));
+    }).catch(() => {});
+
+    await lockAcquiredPromise;
+
+    // uploadBytes must fail instantly (SKIP LOCKED) because the row is locked.
+    await expect(
+      uploadBytes(db, storage, { attachmentId: attachment.id, data: Buffer.from([1, 2, 3]) }),
+    ).rejects.toBeInstanceOf(AttachmentAlreadyFinalizedError);
+
+    await lockHolder;
   });
 });
 
@@ -618,5 +657,51 @@ describe('attachment HTTP adapter (C3-P2)', () => {
     expect(dlResp.status).toBe(409);
     const json = (await dlResp.json()) as Record<string, unknown>;
     expect(json.error).toBe('binary_not_uploaded');
+  });
+
+  it('PUT /api/attachments/:id/upload → 409 attachment_already_finalized when slot is locked by concurrent upload', async () => {
+    const app = buildTestApp();
+    await seedFixtureTask();
+
+    const createResp = await app.fetch(
+      new Request('http://test/api/attachments', bearer(makeBody())),
+    );
+    const { attachment, upload_url } = (await createResp.json()) as {
+      attachment: { id: string };
+      upload_url: string;
+    };
+
+    // Hold the row lock to simulate a concurrent upload in progress.
+    const lockAcquired = { resolve: () => {} };
+    const lockAcquiredPromise = new Promise<void>((res) => {
+      lockAcquired.resolve = res;
+    });
+    const lockHolder = db.transaction(async (tx) => {
+      await tx
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.id, attachment.id))
+        .for('update')
+        .limit(1);
+      lockAcquired.resolve();
+      await new Promise<void>((r) => setTimeout(r, 300));
+    }).catch(() => {});
+
+    await lockAcquiredPromise;
+
+    const uploadResp = await app.fetch(
+      new Request(`http://test${upload_url}`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, 'content-type': 'application/pdf' },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      }),
+    );
+
+    expect(uploadResp.status).toBe(409);
+    const body = (await uploadResp.json()) as Record<string, unknown>;
+    expect(body.error).toBe('attachment_already_finalized');
+    expect(body.attachment_id).toBe(attachment.id);
+
+    await lockHolder;
   });
 });

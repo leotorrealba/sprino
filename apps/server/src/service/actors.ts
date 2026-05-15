@@ -36,7 +36,7 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { actors, actorTokens } from '../db/schema.ts';
+import { actors, actorTokens, workspaceMembers } from '../db/schema.ts';
 import type { ActorRow } from '../db/schema.ts';
 import { hashToken } from '../auth/registry.ts';
 import {
@@ -338,19 +338,27 @@ export async function registerActor(
 
 export async function listActors(
   db: Db,
-  args: { req: ActorListReq },
+  args: { req: ActorListReq; workspaceId: string },
 ): Promise<{ actors: Actor[] }> {
   // Order pushed into SQL so we don't fetch-and-sort the whole table in
   // memory once it grows. Stable order keeps test fixtures and the
   // Members UI consistent across calls.
+  const base = db
+    .select({ actor: actors })
+    .from(actors)
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.actorId, actors.id),
+        eq(workspaceMembers.workspaceId, args.workspaceId),
+      ),
+    );
+
   const rows = await (args.req.kind
-    ? db
-        .select()
-        .from(actors)
-        .where(eq(actors.kind, args.req.kind))
-        .orderBy(asc(actors.id))
-    : db.select().from(actors).orderBy(asc(actors.id)));
-  return { actors: rows.map(rowToActor) };
+    ? base.where(eq(actors.kind, args.req.kind)).orderBy(asc(actors.id))
+    : base.orderBy(asc(actors.id)));
+
+  return { actors: rows.map((r) => rowToActor(r.actor)) };
 }
 
 export async function getActor(
@@ -460,18 +468,25 @@ export type Member = Actor & {
 
 export async function listMembers(
   db: Db,
-  args: { req: ActorListReq },
+  args: { req: ActorListReq; workspaceId: string },
 ): Promise<{ actors: Member[] }> {
+  const base = db
+    .select({ actor: actors })
+    .from(actors)
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.actorId, actors.id),
+        eq(workspaceMembers.workspaceId, args.workspaceId),
+      ),
+    );
+
   const actorRows = await (args.req.kind
-    ? db
-        .select()
-        .from(actors)
-        .where(eq(actors.kind, args.req.kind))
-        .orderBy(asc(actors.id))
-    : db.select().from(actors).orderBy(asc(actors.id)));
+    ? base.where(eq(actors.kind, args.req.kind)).orderBy(asc(actors.id))
+    : base.orderBy(asc(actors.id)));
   if (actorRows.length === 0) return { actors: [] };
 
-  const actorIds = actorRows.map((r) => r.id);
+  const actorIds = actorRows.map((r) => r.actor.id);
   const tokenRows = await db
     .select({
       actorId: actorTokens.actorId,
@@ -500,13 +515,13 @@ export async function listMembers(
 
   return {
     actors: actorRows.map((r) => ({
-      ...rowToActor(r),
-      source: r.source as 'env' | 'db',
-      revoked_at: statusByActor.has(r.id)
-        ? (statusByActor.get(r.id) ?? null)
+      ...rowToActor(r.actor),
+      source: r.actor.source as 'env' | 'db',
+      revoked_at: statusByActor.has(r.actor.id)
+        ? (statusByActor.get(r.actor.id) ?? null)
         : // No tokens at all → treat as revoked at the actor's createdAt
           // so the UI doesn't render "active" for a credential-less row.
-          r.createdAt.toISOString(),
+          r.actor.createdAt.toISOString(),
     })),
   };
 }

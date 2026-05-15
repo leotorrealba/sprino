@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
-import { actors, projects } from '../src/db/schema.ts';
+import { actors, projects, workspaceMembers } from '../src/db/schema.ts';
 import {
   ActorRegisterReqSchema,
   type ActorRegisterReq,
@@ -33,6 +33,7 @@ import {
   FIXTURE_PROJECT_ID,
   FIXTURE_TASK_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
   seedDbActor,
   seedFixtureTask,
@@ -487,6 +488,7 @@ describe('Tessera v0.0.2 project scoping', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
   }
 
@@ -1965,6 +1967,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const expectedRes = readFixture('project-list-happy.res.json') as {
@@ -2005,6 +2008,7 @@ describe('Tessera B6 — fixture gap coverage', () => {
       slug: 'tessera',
       displayName: 'Tessera',
       repoPath: SECOND_PROJECT_REPO,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const req = readFixture(
@@ -2111,6 +2115,12 @@ describe('Tessera B6 — fixture gap coverage', () => {
           agentRuntime: null,
           parentActorId: null,
           source: 'db',
+        }).onConflictDoNothing();
+        // Also add to the fixture workspace so listMembers (workspace-scoped) returns them.
+        await db.insert(workspaceMembers).values({
+          workspaceId: FIXTURE_WORKSPACE_ID,
+          actorId: fixtureActor.id,
+          role: 'member',
         }).onConflictDoNothing();
       }
     }

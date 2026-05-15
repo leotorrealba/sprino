@@ -306,4 +306,38 @@ export const SavedViewSchema = z.object({
 });
 export type SavedView = z.infer<typeof SavedViewSchema>;
 
+// ── E1: Workspace ────────────────────────────────────────────────────────
+
+export const WorkspaceSchema = z.object({
+  id: uuid,
+  name: z.string().min(1).max(100),
+  slug: z.string().min(1).max(50),
+  created_by: uuid.nullable(),
+  created_at: isoDateTime,
+});
+export type Workspace = z.infer<typeof WorkspaceSchema>;
+
+export const WorkspaceCreateResSchema = z.object({
+  workspace: WorkspaceSchema,
+});
+export type WorkspaceCreateRes = z.infer<typeof WorkspaceCreateResSchema>;
+
+export const WorkspaceListResSchema = z.object({
+  workspaces: z.array(WorkspaceSchema),
+});
+export type WorkspaceListRes = z.infer<typeof WorkspaceListResSchema>;
+
+export const WorkspaceMemberSchema = z.object({
+  workspace_id: uuid,
+  actor_id: uuid,
+  role: z.enum(['admin', 'member']),
+  joined_at: isoDateTime,
+});
+export type WorkspaceMember = z.infer<typeof WorkspaceMemberSchema>;
+
+export const WorkspaceMemberListResSchema = z.object({
+  members: z.array(WorkspaceMemberSchema),
+});
+export type WorkspaceMemberListRes = z.infer<typeof WorkspaceMemberListResSchema>;
+
 export const PROTOCOL_VERSION = 'tessera/v0.1.5';

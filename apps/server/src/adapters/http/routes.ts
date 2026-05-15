@@ -26,6 +26,7 @@
 
 import { Hono } from 'hono';
 import type { AuthEnv } from '../../auth/middleware.ts';
+import { workspaceAuth } from '../../auth/middleware.ts';
 import {
   AgentListReqSchema,
   AttachmentCreateUploadReqSchema,
@@ -59,8 +60,11 @@ import {
   UpdateTaskPointsReqSchema,
   SavedViewCreateReqSchema,
   AutomationRuleCreateReqSchema,
+  WorkspaceCreateReqSchema,
+  WorkspaceMemberAddReqSchema,
 } from '../../domain/index.ts';
 import {
+  AttachmentAlreadyFinalizedError,
   AttachmentNotFoundError,
   AttachmentNotReadyError,
   AttachmentTaskNotFoundError,
@@ -68,6 +72,7 @@ import {
   finalize,
   getAttachment,
   listAttachments,
+  uploadBytes,
 } from '../../service/attachments.ts';
 import { storage } from '../../service/attachments/instance.ts';
 import {
@@ -98,8 +103,20 @@ import {
   revokeToken,
   rotateToken,
 } from '../../service/actors.ts';
-import { AuthorizationForbiddenError } from '../../service/authorization.ts';
+import { assertProjectInWorkspace, AuthorizationForbiddenError, WorkspaceIsolationError } from '../../service/authorization.ts';
 import { issueStreamTicket } from '../../auth/stream-ticket.ts';
+import {
+  WorkspaceNotFoundError,
+  WorkspaceSlugConflictError,
+  WorkspaceMemberNotFoundError,
+  WorkspaceAdminRequiredError,
+  WorkspaceLastAdminError,
+  createWorkspace,
+  listWorkspacesForActor,
+  listWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+} from '../../service/workspaces.ts';
 import {
   ChildrenNotDoneError,
   CrossProjectRelationError,
@@ -162,321 +179,34 @@ import { ZodError } from 'zod';
 export function buildHttpRoutes(): Hono<AuthEnv> {
   const api = new Hono<AuthEnv>();
 
-  // ── project.create (Tessera v0.1.5) ─────────────────────────────────────
-  api.post('/projects', async (c) => {
+  // ── Workspace bypass routes (no workspace context required) ───────────────
+
+  api.post('/workspaces', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
-      const req = ProjectCreateReqSchema.parse(body);
+      const req = WorkspaceCreateReqSchema.parse(body);
       const actor = c.get('actor');
-      const res = await createProject(c.get('db'), {
-        req,
-        actorId: actor.id,
-      });
+      const res = await createWorkspace(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
     } catch (err) {
-      return errorResponse(c, err);
+      return workspaceErrorResponse(c, err);
     }
   });
 
-  api.get('/projects', async (c) => {
-    try {
-      const res = await listProjects(c.get('db'));
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/projects/resolve', async (c) => {
-    try {
-      const req = ProjectGetReqSchema.parse({
-        slug: c.req.query('slug') || undefined,
-        repo_path: c.req.query('repo_path') || undefined,
-      });
-      const res = await getProject(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/projects/:id', async (c) => {
-    try {
-      const req = ProjectGetReqSchema.parse({
-        project_id: c.req.param('id'),
-      });
-      const res = await getProject(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/projects/:id/workflow-columns', async (c) => {
-    try {
-      const res = await listWorkflowColumns(c.get('db'), {
-        projectId: c.req.param('id'),
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  // Sprino-specific list extension — see service/tasks.ts.listTasks.
-  // Not exposed via /mcp to keep the canonical protocol minimal.
-  api.get('/tasks', async (c) => {
-    try {
-      const statusParam = c.req.queries('status') ?? [];
-      const req = TaskListReqSchema.parse({
-        project_id: c.req.query('project_id'),
-        status: statusParam.length > 0 ? statusParam : undefined,
-        assignee_id: c.req.query('assignee_id') ?? undefined,
-        parent_task_id: c.req.query('parent_task_id') ?? undefined,
-        title_contains: c.req.query('title_contains') ?? undefined,
-        sprint_id: c.req.query('sprint_id') ?? undefined,
-        limit: c.req.query('limit') ? Number(c.req.query('limit')) : undefined,
-        offset: c.req.query('offset') ? Number(c.req.query('offset')) : undefined,
-      });
-      const res = await listTasks(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.post('/tasks', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = TaskCreateReqSchema.parse(body);
-      const actor = c.get('actor');
-      const res = await createTask(c.get('db'), { req, actorId: actor.id });
-      return c.json(res, 201);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/tasks/:id', async (c) => {
-    try {
-      const req = TaskGetReqSchema.parse({ task_id: c.req.param('id') });
-      const res = await getTask(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.patch('/tasks/:id/status', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = TaskUpdateStatusReqSchema.parse({
-        ...body,
-        task_id: c.req.param('id'),
-      });
-      const actor = c.get('actor');
-      const res = await updateTaskStatus(c.get('db'), {
-        req,
-        actorId: actor.id,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.post('/tasks/:id/transition', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = TaskTransitionWorkflowReqSchema.parse({
-        ...body,
-        task_id: c.req.param('id'),
-      });
-      const actor = c.get('actor');
-      const res = await transitionTaskWorkflow(c.get('db'), {
-        req,
-        actorId: actor.id,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.post('/tasks/:id/reorder', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = TaskReorderReqSchema.parse({
-        ...body,
-        task_id: c.req.param('id'),
-      });
-      const actor = c.get('actor');
-      const res = await reorderTask(c.get('db'), { req, actorId: actor.id });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.patch('/tasks/:id/parent', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = SetParentReqSchema.parse({ ...body, task_id: c.req.param('id') });
-      const actor = c.get('actor');
-      const res = await setParent(c.get('db'), {
-        taskId: req.task_id,
-        parentTaskId: req.parent_task_id,
-        actorId: actor.id,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.post('/tasks/:id/dependencies', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const req = AddDependencyReqSchema.parse({
-        task_id: c.req.param('id'),
-        blocked_by_task_id: body?.blocked_by_task_id,
-      });
-      const actor = c.get('actor');
-      const res = await addDependency(c.get('db'), {
-        fromTaskId: req.task_id,
-        toTaskId: req.blocked_by_task_id,
-        actorId: actor.id,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.delete('/tasks/:id/dependencies/:depId', async (c) => {
+  api.get('/workspaces', async (c) => {
     try {
       const actor = c.get('actor');
-      await removeDependency(c.get('db'), {
-        fromTaskId: c.req.param('id'),
-        toTaskId: c.req.param('depId'),
-        actorId: actor.id,
-      });
-      return new Response(null, { status: 204 });
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/tasks/:id/dependencies', async (c) => {
-    try {
-      const req = ListDependenciesReqSchema.parse({ task_id: c.req.param('id') });
-      const res = await listDependencies(c.get('db'), { taskId: req.task_id });
+      const res = await listWorkspacesForActor(c.get('db'), actor.id);
       return c.json(res, 200);
     } catch (err) {
-      return errorResponse(c, err);
+      return workspaceErrorResponse(c, err);
     }
   });
 
-  // Pagination companions to task.get's agent_context. When agent_context
-  // truncates (>32KB), the next_page_tokens point clients here for the tail.
-  api.get('/tasks/:id/events', async (c) => {
-    try {
-      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
-      const res = await listTaskEvents(c.get('db'), {
-        taskId: c.req.param('id'),
-        limit,
-        offset,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  api.get('/tasks/:id/related_tasks', async (c) => {
-    try {
-      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
-      const res = await listRelatedTasks(c.get('db'), {
-        taskId: c.req.param('id'),
-        limit,
-        offset,
-      });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  // Sprino-specific activity feed endpoint — see service/events.ts.
-  // Project-scoped event log with denormalized actor + task fields. Not
-  // exposed via /mcp; agents read events through task.get's recent_events.
-  api.get('/events', async (c) => {
-    try {
-      // Pass raw query strings into the schema. Zod's `z.coerce.number()`
-      // (configured in EventListReqSchema) rejects malformed values like
-      // `?limit=abc` or `?limit=` with a 400, instead of silently treating
-      // them as "absent".
-      const req = EventListReqSchema.parse({
-        project_id: c.req.query('project_id'),
-        task_id: c.req.query('task_id'),
-        limit: c.req.query('limit'),
-        offset: c.req.query('offset'),
-      });
-      const res = await listEvents(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  // Sprino-specific agent registry list — see service/agents.ts.
-  // Reads the actors table (DB-unified after v0.0.9). Tokens are never
-  // returned. Hard cap of 100 per page (see MAX_LIMITS.agents).
-  api.get('/agents', async (c) => {
-    try {
-      const req = AgentListReqSchema.parse({
-        limit: c.req.query('limit'),
-        offset: c.req.query('offset'),
-      });
-      const res = await listAgents(c.get('db'), { req });
-      return c.json(res, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  // Mints a short-lived signed ticket so the browser EventSource can auth
-  // the SSE stream (which can't send Authorization headers). See
-  // auth/stream-ticket.ts. The ticket is bound to (actor, project) and
-  // expires in 60s. Bearer-protected; the SSE endpoint itself is mounted
-  // outside this Hono router with its own ticket-auth.
-  api.post('/events/stream-ticket', async (c) => {
-    try {
-      const body = await c.req.json().catch(() => ({}));
-      const projectId =
-        typeof body?.project_id === 'string' ? body.project_id : '';
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
-        return c.json(
-          { error: 'validation_error', detail: 'project_id must be a uuid' },
-          400,
-        );
-      }
-      const actor = c.get('actor');
-      const out = issueStreamTicket(actor.id, projectId);
-      // Defense-in-depth: never let a CDN cache a ticket.
-      c.header('Cache-Control', 'no-store');
-      return c.json(out, 200);
-    } catch (err) {
-      return errorResponse(c, err);
-    }
-  });
-
-  // ── Tessera v0.1.2 actor lifecycle ──────────────────────────────────
-  // These endpoints use the `_error` envelope (per the v0.1.2 conformance
-  // fixtures) instead of the flat error shape used by tasks/projects. The
-  // shape divergence is intentional — Tessera is migrating toward the
-  // envelope, but breaking task error shapes at the same time would
-  // explode the conformance diff. See plan §Slice K for the rationale.
+  // ── Actor lifecycle bypass routes (no workspace context required) ─────────
+  // Actor operations are global: actors exist across workspaces. Only
+  // GET /actors (listMembers, workspace-scoped) lives in the ws sub-router.
+  // These use the `_error` envelope per Tessera v0.1.2 conformance.
 
   api.post('/actors', async (c) => {
     try {
@@ -488,20 +218,6 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         callerId: actor.id,
       });
       return c.json(res, 201);
-    } catch (err) {
-      return actorErrorResponse(c, err);
-    }
-  });
-
-  api.get('/actors', async (c) => {
-    try {
-      const kind = c.req.query('kind');
-      const req = ActorListReqSchema.parse(kind ? { kind } : {});
-      // Sprino-internal: surface source + revoked_at so the Members UI
-      // can distinguish env vs db actors and render revocation status.
-      // MCP `actor.list` continues to return the canonical Tessera shape.
-      const res = await listMembers(c.get('db'), { req });
-      return c.json(res, 200);
     } catch (err) {
       return actorErrorResponse(c, err);
     }
@@ -588,11 +304,356 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  // ── Workspace-scoped sub-router (workspaceAuth required) ─────────────────
+  const ws = new Hono<AuthEnv>();
+  ws.use('*', workspaceAuth);
+
+  // ── project.create (Tessera v0.1.5) ─────────────────────────────────────
+  ws.post('/projects', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = ProjectCreateReqSchema.parse(body);
+      const actor = c.get('actor');
+      const res = await createProject(c.get('db'), {
+        req,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/projects', async (c) => {
+    try {
+      const res = await listProjects(c.get('db'), { workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/projects/resolve', async (c) => {
+    try {
+      const req = ProjectGetReqSchema.parse({
+        slug: c.req.query('slug') || undefined,
+        repo_path: c.req.query('repo_path') || undefined,
+      });
+      const res = await getProject(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/projects/:id', async (c) => {
+    try {
+      const req = ProjectGetReqSchema.parse({
+        project_id: c.req.param('id'),
+      });
+      const res = await getProject(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/projects/:id/workflow-columns', async (c) => {
+    try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
+      const res = await listWorkflowColumns(c.get('db'), {
+        projectId: c.req.param('id'),
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific list extension — see service/tasks.ts.listTasks.
+  // Not exposed via /mcp to keep the canonical protocol minimal.
+  ws.get('/tasks', async (c) => {
+    try {
+      const statusParam = c.req.queries('status') ?? [];
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
+      const req = TaskListReqSchema.parse({
+        project_id: c.req.query('project_id'),
+        status: statusParam.length > 0 ? statusParam : undefined,
+        assignee_id: c.req.query('assignee_id') ?? undefined,
+        parent_task_id: c.req.query('parent_task_id') ?? undefined,
+        title_contains: c.req.query('title_contains') ?? undefined,
+        sprint_id: c.req.query('sprint_id') ?? undefined,
+        limit,
+        offset,
+      });
+      const res = await listTasks(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.post('/tasks', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskCreateReqSchema.parse(body);
+      const actor = c.get('actor');
+      const res = await createTask(c.get('db'), { req, actorId: actor.id, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 201);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/tasks/:id', async (c) => {
+    try {
+      const req = TaskGetReqSchema.parse({ task_id: c.req.param('id') });
+      const res = await getTask(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.patch('/tasks/:id/status', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskUpdateStatusReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await updateTaskStatus(c.get('db'), {
+        req,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.post('/tasks/:id/transition', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskTransitionWorkflowReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await transitionTaskWorkflow(c.get('db'), {
+        req,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.post('/tasks/:id/reorder', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskReorderReqSchema.parse({
+        ...body,
+        task_id: c.req.param('id'),
+      });
+      const actor = c.get('actor');
+      const res = await reorderTask(c.get('db'), { req, actorId: actor.id, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.patch('/tasks/:id/parent', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = SetParentReqSchema.parse({ ...body, task_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await setParent(c.get('db'), {
+        taskId: req.task_id,
+        parentTaskId: req.parent_task_id,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.post('/tasks/:id/dependencies', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = AddDependencyReqSchema.parse({
+        task_id: c.req.param('id'),
+        blocked_by_task_id: body?.blocked_by_task_id,
+      });
+      const actor = c.get('actor');
+      const res = await addDependency(c.get('db'), {
+        fromTaskId: req.task_id,
+        toTaskId: req.blocked_by_task_id,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.delete('/tasks/:id/dependencies/:depId', async (c) => {
+    try {
+      const actor = c.get('actor');
+      await removeDependency(c.get('db'), {
+        fromTaskId: c.req.param('id'),
+        toTaskId: c.req.param('depId'),
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return new Response(null, { status: 204 });
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/tasks/:id/dependencies', async (c) => {
+    try {
+      const req = ListDependenciesReqSchema.parse({ task_id: c.req.param('id') });
+      const res = await listDependencies(c.get('db'), { taskId: req.task_id });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Pagination companions to task.get's agent_context. When agent_context
+  // truncates (>32KB), the next_page_tokens point clients here for the tail.
+  ws.get('/tasks/:id/events', async (c) => {
+    try {
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
+      const res = await listTaskEvents(c.get('db'), {
+        taskId: c.req.param('id'),
+        limit,
+        offset,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.get('/tasks/:id/related_tasks', async (c) => {
+    try {
+      const { limit, offset } = parseLimitOffset(c.req.query.bind(c.req));
+      const res = await listRelatedTasks(c.get('db'), {
+        taskId: c.req.param('id'),
+        limit,
+        offset,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific activity feed endpoint — see service/events.ts.
+  // Project-scoped event log with denormalized actor + task fields. Not
+  // exposed via /mcp; agents read events through task.get's recent_events.
+  ws.get('/events', async (c) => {
+    try {
+      // Pass raw query strings into the schema. Zod's `z.coerce.number()`
+      // (configured in EventListReqSchema) rejects malformed values like
+      // `?limit=abc` or `?limit=` with a 400, instead of silently treating
+      // them as "absent".
+      const req = EventListReqSchema.parse({
+        project_id: c.req.query('project_id'),
+        task_id: c.req.query('task_id'),
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      if (req.project_id) {
+        await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
+      }
+      const res = await listEvents(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Sprino-specific agent registry list — see service/agents.ts.
+  // Reads the actors table (DB-unified after v0.0.9). Tokens are never
+  // returned. Hard cap of 100 per page (see MAX_LIMITS.agents).
+  ws.get('/agents', async (c) => {
+    try {
+      const req = AgentListReqSchema.parse({
+        limit: c.req.query('limit'),
+        offset: c.req.query('offset'),
+      });
+      const res = await listAgents(c.get('db'), { req });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // Mints a short-lived signed ticket so the browser EventSource can auth
+  // the SSE stream (which can't send Authorization headers). See
+  // auth/stream-ticket.ts. The ticket is bound to (actor, project) and
+  // expires in 60s. Bearer-protected; the SSE endpoint itself is mounted
+  // outside this Hono router with its own ticket-auth.
+  ws.post('/events/stream-ticket', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const projectId =
+        typeof body?.project_id === 'string' ? body.project_id : '';
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+        return c.json(
+          { error: 'validation_error', detail: 'project_id must be a uuid' },
+          400,
+        );
+      }
+      const actor = c.get('actor');
+      const out = issueStreamTicket(actor.id, projectId);
+      // Defense-in-depth: never let a CDN cache a ticket.
+      c.header('Cache-Control', 'no-store');
+      return c.json(out, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  // ── Tessera v0.1.2 actor lifecycle (workspace-scoped) ────────────────────
+  // These endpoints use the `_error` envelope (per the v0.1.2 conformance
+  // fixtures) instead of the flat error shape used by tasks/projects. The
+  // shape divergence is intentional — Tessera is migrating toward the
+  // envelope, but breaking task error shapes at the same time would
+  // explode the conformance diff. See plan §Slice K for the rationale.
+
+  ws.get('/actors', async (c) => {
+    try {
+      const kind = c.req.query('kind');
+      const req = ActorListReqSchema.parse(kind ? { kind } : {});
+      // Sprino-internal: surface source + revoked_at so the Members UI
+      // can distinguish env vs db actors and render revocation status.
+      // MCP `actor.list` continues to return the canonical Tessera shape.
+      const res = await listMembers(c.get('db'), { req, workspaceId: c.get('workspace')!.id });
+      return c.json(res, 200);
+    } catch (err) {
+      return actorErrorResponse(c, err);
+    }
+  });
+
   // ── Tessera v0.1.4 attachment verbs ────────────────────────────────────
   // Two-phase upload: POST /attachments → PUT /attachments/:id/upload → POST /attachments/:id/finalize.
   // GET /attachments/:id and GET /tasks/:id/attachments are read-only.
 
-  api.post('/attachments', async (c) => {
+  ws.post('/attachments', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = AttachmentCreateUploadReqSchema.parse(body);
@@ -607,24 +668,19 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.put('/attachments/:id/upload', async (c) => {
+  ws.put('/attachments/:id/upload', async (c) => {
     try {
       const attachmentId = c.req.param('id');
-      // Verify the slot exists and is still pending before writing bytes.
-      // Prevents orphan blobs from arbitrary UUIDs and overwrites of finalized attachments.
-      const { attachment } = await getAttachment(c.get('db'), {
-        req: { attachment_id: attachmentId },
-      });
-      if (attachment.status !== 'pending') {
+      const data = Buffer.from(await c.req.arrayBuffer());
+      await uploadBytes(c.get('db'), storage, { attachmentId, data });
+      return new Response(null, { status: 204 });
+    } catch (err) {
+      if (err instanceof AttachmentAlreadyFinalizedError) {
         return c.json(
-          { error: 'attachment_already_finalized', attachment_id: attachmentId },
+          { error: 'attachment_already_finalized', attachment_id: err.attachmentId },
           409,
         );
       }
-      const data = await c.req.arrayBuffer();
-      await storage.write(attachmentId, Buffer.from(data));
-      return new Response(null, { status: 204 });
-    } catch (err) {
       if (err instanceof Error && err.message.startsWith('Invalid attachment id')) {
         return c.json({ error: 'validation_error', details: err.message }, 400);
       }
@@ -632,7 +688,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/attachments/:id/download', async (c) => {
+  ws.get('/attachments/:id/download', async (c) => {
     try {
       const attachmentId = c.req.param('id');
       const { attachment } = await getAttachment(c.get('db'), {
@@ -654,7 +710,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.post('/attachments/:id/finalize', async (c) => {
+  ws.post('/attachments/:id/finalize', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = AttachmentFinalizeReqSchema.parse({
@@ -672,7 +728,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/attachments/:id', async (c) => {
+  ws.get('/attachments/:id', async (c) => {
     try {
       const res = await getAttachment(c.get('db'), {
         req: { attachment_id: c.req.param('id') },
@@ -683,7 +739,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/tasks/:id/attachments', async (c) => {
+  ws.get('/tasks/:id/attachments', async (c) => {
     try {
       const req = AttachmentListReqSchema.parse({
         task_id: c.req.param('id'),
@@ -699,10 +755,11 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   // ── D4: Sprint routes ─────────────────────────────────────────────────────
 
-  api.post('/projects/:id/sprints', async (c) => {
+  ws.post('/projects/:id/sprints', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = SprintCreateReqSchema.parse({ ...body, project_id: c.req.param('id') });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createSprint(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -711,12 +768,13 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/projects/:id/sprints', async (c) => {
+  ws.get('/projects/:id/sprints', async (c) => {
     try {
       const req = SprintListReqSchema.parse({
         project_id: c.req.param('id'),
         status: c.req.query('status') || undefined,
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const res = await listSprints(c.get('db'), { req });
       return c.json(res, 200);
     } catch (err) {
@@ -724,20 +782,23 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/sprints/:id', async (c) => {
+  ws.get('/sprints/:id', async (c) => {
     try {
       const req = SprintGetReqSchema.parse({ sprint_id: c.req.param('id') });
       const res = await getSprint(c.get('db'), { req });
+      await assertProjectInWorkspace(c.get('db'), { projectId: res.sprint.project_id, workspaceId: c.get('workspace')!.id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
     }
   });
 
-  api.patch('/sprints/:id/status', async (c) => {
+  ws.patch('/sprints/:id/status', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = SprintTransitionReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res =
         req.to_status === 'active'
@@ -749,10 +810,12 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.post('/sprints/:id/tasks', async (c) => {
+  ws.post('/sprints/:id/tasks', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = AssignToSprintReqSchema.parse({ ...body, sprint_id: c.req.param('id') });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await assignToSprint(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -761,12 +824,14 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.delete('/sprints/:id/tasks/:taskId', async (c) => {
+  ws.delete('/sprints/:id/tasks/:taskId', async (c) => {
     try {
       const req = RemoveFromSprintReqSchema.parse({
         sprint_id: c.req.param('id'),
         task_id: c.req.param('taskId'),
       });
+      const { sprint } = await getSprint(c.get('db'), { req: { sprint_id: req.sprint_id } });
+      await assertProjectInWorkspace(c.get('db'), { projectId: sprint.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       await removeFromSprint(c.get('db'), { req, actorId: actor.id });
       return c.json({ ok: true }, 200);
@@ -775,12 +840,12 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.patch('/tasks/:id/points', async (c) => {
+  ws.patch('/tasks/:id/points', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = UpdateTaskPointsReqSchema.parse({ ...body, task_id: c.req.param('id') });
       const actor = c.get('actor');
-      const res = await updateTaskPoints(c.get('db'), { req, actorId: actor.id });
+      const res = await updateTaskPoints(c.get('db'), { req, actorId: actor.id, workspaceId: c.get('workspace')!.id });
       return c.json(res, 200);
     } catch (err) {
       return errorResponse(c, err);
@@ -789,13 +854,14 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   // ── D5: Saved views ──────────────────────────────────────────────────────
 
-  api.post('/projects/:id/saved-views', async (c) => {
+  ws.post('/projects/:id/saved-views', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = SavedViewCreateReqSchema.parse({
         ...body,
         project_id: c.req.param('id'),
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createSavedView(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -804,8 +870,9 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/projects/:id/saved-views', async (c) => {
+  ws.get('/projects/:id/saved-views', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       const res = await listSavedViews(c.get('db'), c.req.param('id'));
       return c.json(res, 200);
     } catch (err) {
@@ -813,8 +880,9 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.delete('/projects/:id/saved-views/:viewId', async (c) => {
+  ws.delete('/projects/:id/saved-views/:viewId', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       await deleteSavedView(c.get('db'), {
         viewId: c.req.param('viewId'),
         projectId: c.req.param('id'),
@@ -827,13 +895,14 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
 
   // ── D5: Automation rules ─────────────────────────────────────────────────
 
-  api.post('/projects/:id/automation-rules', async (c) => {
+  ws.post('/projects/:id/automation-rules', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const req = AutomationRuleCreateReqSchema.parse({
         ...body,
         project_id: c.req.param('id'),
       });
+      await assertProjectInWorkspace(c.get('db'), { projectId: req.project_id, workspaceId: c.get('workspace')!.id });
       const actor = c.get('actor');
       const res = await createAutomationRule(c.get('db'), { req, actorId: actor.id });
       return c.json(res, 201);
@@ -842,8 +911,9 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.get('/projects/:id/automation-rules', async (c) => {
+  ws.get('/projects/:id/automation-rules', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       const res = await listAutomationRules(c.get('db'), c.req.param('id'));
       return c.json(res, 200);
     } catch (err) {
@@ -851,8 +921,9 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
-  api.delete('/projects/:id/automation-rules/:ruleId', async (c) => {
+  ws.delete('/projects/:id/automation-rules/:ruleId', async (c) => {
     try {
+      await assertProjectInWorkspace(c.get('db'), { projectId: c.req.param('id'), workspaceId: c.get('workspace')!.id });
       await deleteAutomationRule(c.get('db'), {
         ruleId: c.req.param('ruleId'),
         projectId: c.req.param('id'),
@@ -863,7 +934,79 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
     }
   });
 
+  api.route('/', ws);
+
+  // ── Workspace member routes (bypass — service guards membership internally) ─
+  // These are intentionally placed AFTER ws is mounted so the auth middleware
+  // has already validated the bearer token, but they do NOT require a workspace
+  // context header. The service functions verify the caller is a member of the
+  // *requested* workspace before acting (preventing IDOR cross-workspace access).
+
+  api.get('/workspaces/:id/members', async (c) => {
+    try {
+      const res = await listWorkspaceMembers(c.get('db'), {
+        workspaceId: c.req.param('id'),
+        actorId: c.get('actor').id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return workspaceErrorResponse(c, err);
+    }
+  });
+
+  api.post('/workspaces/:id/members', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = WorkspaceMemberAddReqSchema.parse(body);
+      await addWorkspaceMember(c.get('db'), {
+        workspaceId: c.req.param('id'),
+        req,
+        adminActorId: c.get('actor').id,
+      });
+      return c.json({}, 201);
+    } catch (err) {
+      return workspaceErrorResponse(c, err);
+    }
+  });
+
+  api.delete('/workspaces/:id/members/:actorId', async (c) => {
+    try {
+      await removeWorkspaceMember(c.get('db'), {
+        workspaceId: c.req.param('id'),
+        actorId: c.req.param('actorId'),
+        adminActorId: c.get('actor').id,
+      });
+      return new Response(null, { status: 204 });
+    } catch (err) {
+      return workspaceErrorResponse(c, err);
+    }
+  });
+
   return api;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function workspaceErrorResponse(c: any, err: unknown): Response {
+  if (err instanceof ZodError) {
+    return c.json({ error: 'validation_error', details: err.issues }, 400);
+  }
+  if (err instanceof WorkspaceSlugConflictError) {
+    return c.json({ error: 'workspace_slug_conflict', slug: err.slug }, 409);
+  }
+  if (err instanceof WorkspaceNotFoundError) {
+    return c.json({ error: 'workspace_not_found', workspace_id: err.workspaceId }, 404);
+  }
+  if (err instanceof WorkspaceAdminRequiredError) {
+    return c.json({ error: 'workspace_admin_required', actor_id: err.actorId }, 403);
+  }
+  if (err instanceof WorkspaceMemberNotFoundError) {
+    return c.json({ error: 'workspace_member_not_found', actor_id: err.actorId }, 404);
+  }
+  if (err instanceof WorkspaceLastAdminError) {
+    return c.json({ error: 'workspace_last_admin' }, 409);
+  }
+  console.error('Unhandled workspace error:', err);
+  return c.json({ error: 'internal_error' }, 500);
 }
 
 /**
@@ -1063,16 +1206,21 @@ function actorErrorResponse(c: any, err: unknown): Response {
 function parseLimitOffset(
   q: (key: string) => string | undefined,
 ): { limit: number | undefined; offset: number | undefined } {
-  const parseIntParam = (v: string | undefined): number | undefined => {
+  const parseIntParam = (key: string): number | undefined => {
+    const v = q(key);
     if (v === undefined || v === '') return undefined;
-    if (!/^-?\d+$/.test(v)) return undefined;
-    const n = Number(v);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return undefined;
-    return n;
+    if (!/^\d+$/.test(v)) {
+      throw new ZodError([{
+        code: 'custom' as const,
+        path: [key],
+        message: `${key} must be a non-negative integer`,
+      }]);
+    }
+    return Number(v);
   };
   return {
-    limit: parseIntParam(q('limit')),
-    offset: parseIntParam(q('offset')),
+    limit: parseIntParam('limit'),
+    offset: parseIntParam('offset'),
   };
 }
 
@@ -1193,6 +1341,12 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof AutomationRuleNotFoundError) {
     return c.json({ error: 'automation_rule_not_found', rule_id: err.ruleId }, 404);
+  }
+  if (err instanceof WorkspaceIsolationError) {
+    return c.json(
+      { error: 'workspace_isolation', project_id: err.projectId, workspace_id: err.workspaceId },
+      403,
+    );
   }
   console.error('Unhandled error:', err);
   return c.json({ error: 'internal_error' }, 500);

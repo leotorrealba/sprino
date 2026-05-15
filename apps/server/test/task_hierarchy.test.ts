@@ -25,6 +25,7 @@ import {
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
   FIXTURE_TOKEN,
   buildTestApp,
 } from './setup.ts';
@@ -35,6 +36,7 @@ async function makeTask(title: string): Promise<string> {
   const res = await createTask(db, {
     req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return res.task.id;
 }
@@ -46,7 +48,7 @@ describe('D3-P1: parent_task_id persists', () => {
     const parentId = await makeTask('parent task');
     const childId = await makeTask('child task');
 
-    await setParent(db, { taskId: childId, parentTaskId: parentId, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: childId, parentTaskId: parentId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const rows = await db.select({ parentTaskId: tasks.parentTaskId })
       .from(tasks)
@@ -57,8 +59,8 @@ describe('D3-P1: parent_task_id persists', () => {
   it('setParent(null) clears parent_task_id', async () => {
     const parentId = await makeTask('parent clear');
     const childId = await makeTask('child clear');
-    await setParent(db, { taskId: childId, parentTaskId: parentId, actorId: FIXTURE_ACTOR_ID });
-    await setParent(db, { taskId: childId, parentTaskId: null, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: childId, parentTaskId: parentId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+    await setParent(db, { taskId: childId, parentTaskId: null,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const rows = await db.select({ parentTaskId: tasks.parentTaskId })
       .from(tasks)
@@ -70,7 +72,7 @@ describe('D3-P1: parent_task_id persists', () => {
     const fromId = await makeTask('from task');
     const toId = await makeTask('to task');
 
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const rows = await db.select()
       .from(taskDependencies)
@@ -82,7 +84,7 @@ describe('D3-P1: parent_task_id persists', () => {
   it('listDependencies returns tasks that block the given task', async () => {
     const fromId = await makeTask('list-from');
     const toId = await makeTask('list-to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const { blocked_by } = await listDependencies(db, { taskId: fromId });
     expect(blocked_by).toHaveLength(1);
@@ -92,9 +94,9 @@ describe('D3-P1: parent_task_id persists', () => {
   it('rowToTask includes parent_task_id field', async () => {
     const parentId = await makeTask('rowToTask parent');
     const childId = await makeTask('rowToTask child');
-    await setParent(db, { taskId: childId, parentTaskId: parentId, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: childId, parentTaskId: parentId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
-    const { task } = await getTask(db, { req: { task_id: childId } });
+    const { task } = await getTask(db, { req: { task_id: childId }, workspaceId: FIXTURE_WORKSPACE_ID });
     expect(task).toHaveProperty('parent_task_id', parentId);
   });
 });
@@ -106,10 +108,10 @@ describe('D3-P2: setParent guards', () => {
     const aId = await makeTask('cycle A');
     const bId = await makeTask('cycle B');
 
-    await setParent(db, { taskId: aId, parentTaskId: bId, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: aId, parentTaskId: bId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     await expect(
-      setParent(db, { taskId: bId, parentTaskId: aId, actorId: FIXTURE_ACTOR_ID }),
+      setParent(db, { taskId: bId, parentTaskId: aId, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
     ).rejects.toBeInstanceOf(ParentCycleDetectedError);
   });
 
@@ -119,11 +121,11 @@ describe('D3-P2: setParent guards', () => {
     const l3 = await makeTask('depth L3');
     const l4 = await makeTask('depth L4');
 
-    await setParent(db, { taskId: l2, parentTaskId: l1, actorId: FIXTURE_ACTOR_ID });
-    await setParent(db, { taskId: l3, parentTaskId: l2, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: l2, parentTaskId: l1,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+    await setParent(db, { taskId: l3, parentTaskId: l2,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     await expect(
-      setParent(db, { taskId: l4, parentTaskId: l3, actorId: FIXTURE_ACTOR_ID }),
+      setParent(db, { taskId: l4, parentTaskId: l3, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
     ).rejects.toBeInstanceOf(HierarchyDepthExceededError);
   });
 
@@ -132,9 +134,41 @@ describe('D3-P2: setParent guards', () => {
     const l2 = await makeTask('3-level L2');
     const l3 = await makeTask('3-level L3');
 
-    await setParent(db, { taskId: l2, parentTaskId: l1, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: l2, parentTaskId: l1,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
     await expect(
-      setParent(db, { taskId: l3, parentTaskId: l2, actorId: FIXTURE_ACTOR_ID }),
+      setParent(db, { taskId: l3, parentTaskId: l2, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
+    ).resolves.not.toThrow();
+  });
+});
+
+describe('EC-2: setParent descendant depth check', () => {
+  it('setParent throws HierarchyDepthExceededError when moving a task with children would exceed max depth', async () => {
+    const p1 = await makeTask('EC-2 P1');
+    const p2 = await makeTask('EC-2 P2');
+    const p3 = await makeTask('EC-2 P3');
+    await setParent(db, { taskId: p2, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+    await setParent(db, { taskId: p3, parentTaskId: p2, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    const a = await makeTask('EC-2 A');
+    const b = await makeTask('EC-2 B');
+    await setParent(db, { taskId: b, parentTaskId: a, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(
+      setParent(db, { taskId: a, parentTaskId: p2, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
+    ).rejects.toBeInstanceOf(HierarchyDepthExceededError);
+  });
+
+  it('setParent succeeds when tree fits within max depth after considering descendants', async () => {
+    const p1 = await makeTask('EC-2 fit P1');
+    const p2 = await makeTask('EC-2 fit P2');
+    await setParent(db, { taskId: p2, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    const a = await makeTask('EC-2 fit A');
+    const b = await makeTask('EC-2 fit B');
+    await setParent(db, { taskId: b, parentTaskId: a, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(
+      setParent(db, { taskId: a, parentTaskId: p1, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
     ).resolves.not.toThrow();
   });
 });
@@ -144,10 +178,10 @@ describe('D3-P2: addDependency guards', () => {
     const aId = await makeTask('dep cycle A');
     const bId = await makeTask('dep cycle B');
 
-    await addDependency(db, { fromTaskId: aId, toTaskId: bId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: aId, toTaskId: bId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     await expect(
-      addDependency(db, { fromTaskId: bId, toTaskId: aId, actorId: FIXTURE_ACTOR_ID }),
+      addDependency(db, { fromTaskId: bId, toTaskId: aId, actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID }),
     ).rejects.toBeInstanceOf(DependencyCycleDetectedError);
   });
 
@@ -155,7 +189,7 @@ describe('D3-P2: addDependency guards', () => {
     const fromId = await makeTask('auto-block from');
     const toId = await makeTask('auto-block to');
 
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const rows = await db.select({ status: tasks.status })
       .from(tasks)
@@ -168,7 +202,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
   it('rejects transition to doing when dependency is unresolved', async () => {
     const fromId = await makeTask('guard doing from');
     const toId = await makeTask('guard doing to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const taskRow = (await db.select().from(tasks).where(eq(tasks.id, fromId)))[0]!;
 
@@ -181,6 +215,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
           if_match: taskRow.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(DependencyNotResolvedError);
   });
@@ -188,7 +223,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
   it('rejects transition to done when dependency is unresolved', async () => {
     const fromId = await makeTask('guard done from');
     const toId = await makeTask('guard done to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const taskRow = (await db.select().from(tasks).where(eq(tasks.id, fromId)))[0]!;
 
@@ -201,6 +236,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
           if_match: taskRow.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(DependencyNotResolvedError);
   });
@@ -208,7 +244,7 @@ describe('D3-P2: updateTaskStatus guards', () => {
   it('rejects transition to done when children are not done', async () => {
     const parentId = await makeTask('parent not done');
     const childId = await makeTask('child not done');
-    await setParent(db, { taskId: childId, parentTaskId: parentId, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: childId, parentTaskId: parentId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const parentRow = (await db.select().from(tasks).where(eq(tasks.id, parentId)))[0]!;
 
@@ -221,27 +257,28 @@ describe('D3-P2: updateTaskStatus guards', () => {
           if_match: parentRow.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toBeInstanceOf(ChildrenNotDoneError);
   });
 });
 
 describe('D3-P2: removeDependency', () => {
-  it('removes the dependency row and does NOT auto-change status', async () => {
+  it('removes the dependency row and auto-reverts status to todo when last blocker is removed', async () => {
     const fromId = await makeTask('remove from');
     const toId = await makeTask('remove to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
-    await removeDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await removeDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const depRows = await db.select()
       .from(taskDependencies)
       .where(eq(taskDependencies.fromTaskId, fromId));
     expect(depRows).toHaveLength(0);
 
-    // Status stays 'blocked' — must be manually updated by actor.
+    // EC-3: removing the last unresolved dependency auto-reverts todo/doing → blocked workflow back to `todo`.
     const taskRow = (await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, fromId)))[0]!;
-    expect(taskRow.status).toBe('blocked');
+    expect(taskRow.status).toBe('todo');
   });
 });
 
@@ -270,8 +307,8 @@ describe('D3-P2: HTTP PATCH /api/tasks/:id/parent', () => {
     const l2 = await makeTask('http depth L2');
     const l3 = await makeTask('http depth L3');
     const l4 = await makeTask('http depth L4');
-    await setParent(db, { taskId: l2, parentTaskId: l1, actorId: FIXTURE_ACTOR_ID });
-    await setParent(db, { taskId: l3, parentTaskId: l2, actorId: FIXTURE_ACTOR_ID });
+    await setParent(db, { taskId: l2, parentTaskId: l1,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
+    await setParent(db, { taskId: l3, parentTaskId: l2,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const res = await app.request(`/api/tasks/${l4}/parent`, {
       method: 'PATCH',
@@ -306,7 +343,7 @@ describe('D3-P2: HTTP DELETE /api/tasks/:id/dependencies/:depId', () => {
     const app = buildTestApp();
     const fromId = await makeTask('http del from');
     const toId = await makeTask('http del to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const res = await app.request(`/api/tasks/${fromId}/dependencies/${toId}`, {
       method: 'DELETE',
@@ -322,7 +359,7 @@ describe('D3-P2: HTTP GET /api/tasks/:id/dependencies', () => {
     const app = buildTestApp();
     const fromId = await makeTask('http list from');
     const toId = await makeTask('http list to');
-    await addDependency(db, { fromTaskId: fromId, toTaskId: toId, actorId: FIXTURE_ACTOR_ID });
+    await addDependency(db, { fromTaskId: fromId, toTaskId: toId,  actorId: FIXTURE_ACTOR_ID, workspaceId: FIXTURE_WORKSPACE_ID });
 
     const res = await app.request(`/api/tasks/${fromId}/dependencies`, {
       headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },

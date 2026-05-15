@@ -31,9 +31,10 @@ function uuidv7(): string {
 
 interface Props {
   token: string;
+  workspaceId: string;
 }
 
-export function Members({ token }: Props) {
+export function Members({ token, workspaceId }: Props) {
   const [actors, setActors] = useState<Actor[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,10 +55,11 @@ export function Members({ token }: Props) {
         headers: {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
+          ...(workspaceId ? { 'x-workspace-id': workspaceId } : {}),
           ...(init.headers ?? {}),
         },
       }),
-    [token],
+    [token, workspaceId],
   );
 
   const refresh = useCallback(async () => {

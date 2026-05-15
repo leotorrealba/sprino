@@ -28,13 +28,15 @@ import { tokenAuth } from '../src/auth/middleware.ts';
 import type { AuthVars } from '../src/auth/middleware.ts';
 import { db } from '../src/db/client.ts';
 import { seedFromEnv } from '../src/db/seed.ts';
-import { actors, actorTokens } from '../src/db/schema.ts';
+import { actors, actorTokens, workspaceMembers } from '../src/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
+  seedWorkspace,
 } from './setup.ts';
 
 describe('auth/registry — parseActorsEnv', () => {
@@ -351,5 +353,64 @@ describe('Bearer-token middleware via tokenAuth', () => {
       }),
     );
     expect(r.status).toBe(403);
+  });
+});
+
+describe('workspace resolution in workspaceAuth middleware', () => {
+  it('valid X-Workspace-ID header → 200', async () => {
+    const app = buildTestApp();
+    const r = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: {
+          authorization: `Bearer ${FIXTURE_TOKEN}`,
+          'x-workspace-id': FIXTURE_WORKSPACE_ID,
+        },
+      }),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it('X-Workspace-ID for workspace actor is not a member of → 403', async () => {
+    const app = buildTestApp();
+    const wsOther = await seedWorkspace({ slug: 'not-member-auth' });
+
+    const r = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: {
+          authorization: `Bearer ${FIXTURE_TOKEN}`,
+          'x-workspace-id': wsOther,
+        },
+      }),
+    );
+    expect(r.status).toBe(403);
+  });
+
+  it('no header, actor has 1 workspace → 200 (auto-select)', async () => {
+    const app = buildTestApp();
+    const r = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(200);
+  });
+
+  it('no header, actor has 2 workspaces → 400 workspace_id_required', async () => {
+    const app = buildTestApp();
+    const ws2 = await seedWorkspace({ slug: 'second-auth-ws' });
+    await db.insert(workspaceMembers).values({
+      workspaceId: ws2,
+      actorId: FIXTURE_ACTOR_ID,
+      role: 'member',
+    });
+
+    const r = await app.fetch(
+      new Request('http://test/api/projects', {
+        headers: { authorization: `Bearer ${FIXTURE_TOKEN}` },
+      }),
+    );
+    expect(r.status).toBe(400);
+    const body = await r.json() as { error: string };
+    expect(body.error).toBe('workspace_id_required');
   });
 });

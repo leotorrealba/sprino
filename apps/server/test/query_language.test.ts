@@ -17,6 +17,7 @@ import { listTasks, createTask } from '../src/service/tasks.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
 } from './setup.ts';
 
 // ── TaskFiltersSchema validation ──────────────────────────────────────────────
@@ -136,14 +137,17 @@ describe('listTasks — title_contains', () => {
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'Auth flow design' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'Pagination bug fix' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const res = await listTasks(db, {
       req: { project_id: FIXTURE_PROJECT_ID, title_contains: 'auth' },
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.tasks.every((t) => t.title.toLowerCase().includes('auth'))).toBe(true);
     expect(res.tasks.some((t) => t.title.includes('Auth'))).toBe(true);
@@ -153,9 +157,11 @@ describe('listTasks — title_contains', () => {
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'Unrelated task' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const res = await listTasks(db, {
       req: { project_id: FIXTURE_PROJECT_ID, title_contains: 'zzznomatch' },
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.tasks).toHaveLength(0);
   });
@@ -166,10 +172,12 @@ describe('listTasks — sprint_id', () => {
     const { task: taskA } = await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'Sprint task' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     await createTask(db, {
       req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'Not in sprint' },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     // Insert sprint + sprint_task directly
@@ -189,6 +197,7 @@ describe('listTasks — sprint_id', () => {
 
     const res = await listTasks(db, {
       req: { project_id: FIXTURE_PROJECT_ID, sprint_id: sprintId },
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.tasks).toHaveLength(1);
     expect(res.tasks[0]!.id).toBe(taskA.id);

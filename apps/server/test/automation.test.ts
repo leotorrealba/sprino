@@ -13,12 +13,14 @@ import { createTask, updateTaskStatus } from '../src/service/tasks.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
 } from './setup.ts';
 
 async function makeTask(title: string) {
   const res = await createTask(db, {
     req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return res.task;
 }
@@ -135,6 +137,7 @@ describe('automation rule engine — status trigger', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const rows = await db.select().from(tasks).where(eq(tasks.id, task.id));
@@ -165,6 +168,7 @@ describe('automation rule engine — status trigger', () => {
     await updateTaskStatus(db, {
       req: { operation_id: uuidv7(), task_id: task.id, status: 'doing', if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const rows = await db.select().from(tasks).where(eq(tasks.id, task.id));
@@ -222,6 +226,7 @@ describe('automation rule engine — one-level chain cap', () => {
     await updateTaskStatus(db, {
       req: { operation_id: uuidv7(), task_id: task.id, status: 'doing', if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const rows = await db.select().from(tasks).where(eq(tasks.id, task.id));

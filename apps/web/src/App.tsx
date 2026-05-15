@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Actor, Project, Task, TaskStatus } from '@sprino/protocol-types';
+import type { Actor, Project, Task, TaskStatus, Workspace } from '@sprino/protocol-types';
+import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { ActivityFeed } from './components/ActivityFeed';
 import { Attachments } from './components/Attachments';
 import { BoardFilters, type BoardFilterState } from './components/BoardFilters';
@@ -25,12 +26,16 @@ const STATUS_PILL: Record<TaskStatus, string> = {
 
 const TOKEN_STORAGE_KEY = 'sprino_token';
 const PROJECT_STORAGE_KEY = 'sprino_project_id';
+const WORKSPACE_STORAGE_KEY = 'sprino_workspace_id';
 
 export function App() {
   const [token, setToken] = useState(
     () => localStorage.getItem(TOKEN_STORAGE_KEY) ?? '',
   );
   const [tokenDraft, setTokenDraft] = useState(token);
+  const [workspaceId, setWorkspaceId] = useState(
+    () => localStorage.getItem(WORKSPACE_STORAGE_KEY) ?? '',
+  );
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState(
     () => localStorage.getItem(PROJECT_STORAGE_KEY) ?? '',
@@ -57,10 +62,11 @@ export function App() {
         headers: {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
+          ...(workspaceId ? { 'x-workspace-id': workspaceId } : {}),
           ...(init.headers ?? {}),
         },
       }),
-    [token],
+    [token, workspaceId],
   );
 
   const refreshProjects = useCallback(async () => {
@@ -88,6 +94,20 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [fetchAuth, token]);
+
+  const handleWorkspaceChange = useCallback(
+    (id: string) => {
+      localStorage.setItem(WORKSPACE_STORAGE_KEY, id);
+      setWorkspaceId(id);
+      setProjects([]);
+      setTasks([]);
+      setMembers([]);
+      setSelectedProjectId('');
+      setSelectedTaskId(null);
+    },
+    // all deps are stable React state-setter refs
+    [],
+  );
 
   const refresh = useCallback(async () => {
     if (!token || !selectedProjectId) {
@@ -122,6 +142,25 @@ export function App() {
   }, [refreshProjects]);
 
   useEffect(() => {
+    if (!token) return;
+    fetch('/api/workspaces', {
+      headers: { authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { workspaces?: Workspace[] } | null) => {
+        const list = j?.workspaces ?? [];
+        if (list.length === 0) return;
+        const saved = list.find((w) => w.id === workspaceId);
+        if (!saved) {
+          const first = list[0]!;
+          localStorage.setItem(WORKSPACE_STORAGE_KEY, first.id);
+          setWorkspaceId(first.id);
+        }
+      })
+      .catch(() => {});
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     void refresh();
     // Poll every 3s — SSE/LISTEN-NOTIFY is a v0.2 milestone (design §Realtime).
     const t = setInterval(() => void refresh(), 3000);
@@ -129,12 +168,12 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!token || !selectedProjectId) { setMembers([]); return; }
-    fetchAuth(`/api/members?project_id=${selectedProjectId}`)
+    if (!token) { setMembers([]); return; }
+    fetchAuth('/api/actors')
       .then((r) => r.ok ? r.json() : Promise.resolve({ actors: [] }))
       .then((j: { actors: Actor[] }) => setMembers(j.actors))
       .catch(() => setMembers([]));
-  }, [fetchAuth, token, selectedProjectId]);
+  }, [fetchAuth, token]);
 
   // Restore filter state from URL params on mount (shareable links).
   useEffect(() => {
@@ -296,6 +335,11 @@ export function App() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <WorkspaceSwitcher
+              workspaceId={workspaceId}
+              onWorkspaceChange={handleWorkspaceChange}
+              token={token}
+            />
             <nav className="flex gap-1 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
               <button
                 onClick={() => setView('tasks')}
@@ -367,11 +411,13 @@ export function App() {
               onClick={() => {
                 localStorage.removeItem(TOKEN_STORAGE_KEY);
                 localStorage.removeItem(PROJECT_STORAGE_KEY);
+                localStorage.removeItem(WORKSPACE_STORAGE_KEY);
                 setToken('');
                 setTokenDraft('');
                 setSelectedProjectId('');
                 setProjects([]);
                 setTasks([]);
+                setWorkspaceId('');
               }}
               className="text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
             >
@@ -389,7 +435,7 @@ export function App() {
                 value={newProjectSlug}
                 onChange={(e) => setNewProjectSlug(e.target.value)}
                 placeholder="slug (e.g. my-project)"
-                pattern="^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+                pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
                 required
                 className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm focus:border-slate-400 focus:outline-none"
               />
@@ -421,7 +467,7 @@ export function App() {
 
       <main className="mx-auto max-w-4xl px-6 py-8">
         {view === 'members' ? (
-          <Members token={token} />
+          <Members token={token} workspaceId={workspaceId} />
         ) : view === 'sprint' ? (
           selectedProjectId ? (
             <SprintBoard projectId={selectedProjectId} token={token} />

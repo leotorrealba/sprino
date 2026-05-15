@@ -3,13 +3,13 @@
 //
 // Sprint lifecycle: planning → active → completed.
 // At most one active sprint per project (service-enforced).
-// Sprint-task: a task may only belong to one active sprint.
+// Sprint-task: a task may only belong to one non-completed (planning or active) sprint.
 //
 // assignToSprint and removeFromSprint live here (not in tasks.ts) to avoid
 // circular imports: service/sprints.ts imports rowToTask from service/tasks.ts;
 // service/tasks.ts does NOT import from service/sprints.ts.
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { events, sprints, sprintTasks, tasks } from '../db/schema.ts';
@@ -60,7 +60,7 @@ export class InvalidSprintTransitionError extends Error {
 
 export class TaskAlreadyInActiveSprintError extends Error {
   constructor(public readonly taskId: string) {
-    super(`task ${taskId} is already assigned to an active sprint`);
+    super(`task ${taskId} is already assigned to a non-completed sprint`);
     this.name = 'TaskAlreadyInActiveSprintError';
   }
 }
@@ -350,12 +350,18 @@ export async function assignToSprint(
 
     if (sprint.projectId !== task.projectId) throw new CrossProjectSprintError();
 
-    const existingActive = await tx
+    const existingNonCompleted = await tx
       .select({ sprintId: sprintTasks.sprintId })
       .from(sprintTasks)
       .innerJoin(sprints, eq(sprints.id, sprintTasks.sprintId))
-      .where(and(eq(sprintTasks.taskId, args.req.task_id), eq(sprints.status, 'active')));
-    if (existingActive.length > 0) {
+      .where(
+        and(
+          eq(sprintTasks.taskId, args.req.task_id),
+          ne(sprintTasks.sprintId, args.req.sprint_id),
+          inArray(sprints.status, ['active', 'planning']),
+        ),
+      );
+    if (existingNonCompleted.length > 0) {
       throw new TaskAlreadyInActiveSprintError(args.req.task_id);
     }
 

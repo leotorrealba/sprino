@@ -22,6 +22,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 import { createTask } from '../src/service/tasks.ts';
@@ -281,6 +282,7 @@ describe('Phase 6C — SSE stream replay + headers', () => {
       const op = `06b3a000-0000-7000-8000-${String(i).padStart(12, '0')}`;
       await createTask(db, {
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
         req: {
           project_id: FIXTURE_PROJECT_ID,
           title: `replay-${i}`,
@@ -413,6 +415,7 @@ describe('Phase 6C — SSE stream replay + headers', () => {
 
     const created = await createTask(db, {
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
       req: {
         project_id: FIXTURE_PROJECT_ID,
         title: 'post-revoke-stream-event',

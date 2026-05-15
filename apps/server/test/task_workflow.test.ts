@@ -7,17 +7,23 @@ import { eq } from 'drizzle-orm';
 import { db } from '../src/db/client.ts';
 import { workflowColumns } from '../src/db/schema.ts';
 import {
+  ChildrenNotDoneError,
+  DependencyNotResolvedError,
   WorkflowColumnNotFoundError,
   WorkflowTransitionForbiddenError,
   VersionMismatchError,
+  addDependency,
   createTask,
+  getTask,
   listWorkflowColumns,
+  setParent,
   transitionTaskWorkflow,
 } from '../src/service/tasks.ts';
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 
@@ -50,6 +56,7 @@ describe('D1-P1: workflow state persistence', () => {
         title: 'Workflow column test task',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     const cols = await db
@@ -72,6 +79,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         title: 'Transition test task',
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     return res.task;
   }
@@ -100,6 +108,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(res.task.workflow_column_id).toBe(inProgress.id);
@@ -123,6 +132,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(WorkflowTransitionForbiddenError);
   });
@@ -138,6 +148,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(WorkflowColumnNotFoundError);
   });
@@ -156,6 +167,7 @@ describe('D1-P2: transitionTaskWorkflow', () => {
           if_match: task.version + 99,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       }),
     ).rejects.toThrow(VersionMismatchError);
   });
@@ -169,10 +181,12 @@ describe('D1-P2: transitionTaskWorkflow', () => {
     const res1 = await transitionTaskWorkflow(db, {
       req: { operation_id: opId, task_id: task.id, to_column_id: inProgress.id, if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const res2 = await transitionTaskWorkflow(db, {
       req: { operation_id: opId, task_id: task.id, to_column_id: inProgress.id, if_match: task.version },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
 
     expect(res1.task.id).toBe(res2.task.id);
@@ -199,8 +213,112 @@ describe('D1-P2: transitionTaskWorkflow', () => {
         if_match: task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     expect(res.task.workflow_column_id).toBe(done.id);
+  });
+});
+
+describe('EC-1: transitionTaskWorkflow status guard bypass', () => {
+  async function setupTaskWithColumns() {
+    // Create a task in the project
+    const res = await createTask(db, {
+      req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'EC-1 test task' },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+    // Get the workflow columns for the project
+    const { columns } = await listWorkflowColumns(db, { projectId: FIXTURE_PROJECT_ID });
+    return { task: res.task, columns };
+  }
+
+  it('transitionTaskWorkflow throws DependencyNotResolvedError when target column maps to doing and task has unresolved deps', async () => {
+    const { task, columns } = await setupTaskWithColumns();
+    // Find the "In Progress" column (maps to 'doing')
+    const doingCol = columns.find((c) => c.maps_to_status === 'doing');
+    if (!doingCol) return; // skip if no doing column in fixture
+
+    // Create a blocker task and add dependency
+    const blockerRes = await createTask(db, {
+      req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'EC-1 blocker' },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+    await addDependency(db, {
+      fromTaskId: task.id,
+      toTaskId: blockerRes.task.id,
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+
+    // Re-fetch task to get updated version
+    const updated = await getTask(db, { req: { task_id: task.id }, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(transitionTaskWorkflow(db, {
+      req: {
+        operation_id: uuidv7(),
+        task_id: task.id,
+        to_column_id: doingCol.id,
+        if_match: updated.task.version,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    })).rejects.toThrow(DependencyNotResolvedError);
+  });
+
+  it('transitionTaskWorkflow throws ChildrenNotDoneError when target column maps to done and task has undone children', async () => {
+    const { task, columns } = await setupTaskWithColumns();
+    const doingCol = columns.find((c) => c.name === 'In Progress');
+    const inReviewCol = columns.find((c) => c.name === 'In Review');
+    const doneCol = columns.find((c) => c.maps_to_status === 'done');
+    if (!doingCol || !inReviewCol || !doneCol) return;
+
+    const childRes = await createTask(db, {
+      req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title: 'EC-1 child' },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+    await setParent(db, {
+      taskId: childRes.task.id,
+      parentTaskId: task.id,
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+
+    let t = await getTask(db, { req: { task_id: task.id }, workspaceId: FIXTURE_WORKSPACE_ID });
+    await transitionTaskWorkflow(db, {
+      req: {
+        operation_id: uuidv7(),
+        task_id: task.id,
+        to_column_id: doingCol.id,
+        if_match: t.task.version,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+    t = await getTask(db, { req: { task_id: task.id }, workspaceId: FIXTURE_WORKSPACE_ID });
+    await transitionTaskWorkflow(db, {
+      req: {
+        operation_id: uuidv7(),
+        task_id: task.id,
+        to_column_id: inReviewCol.id,
+        if_match: t.task.version,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    });
+    const updated = await getTask(db, { req: { task_id: task.id }, workspaceId: FIXTURE_WORKSPACE_ID });
+
+    await expect(transitionTaskWorkflow(db, {
+      req: {
+        operation_id: uuidv7(),
+        task_id: task.id,
+        to_column_id: doneCol.id,
+        if_match: updated.task.version,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
+    })).rejects.toThrow(ChildrenNotDoneError);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
   FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
   buildTestApp,
 } from './setup.ts';
 import { createTask } from '../src/service/tasks.ts';
@@ -91,6 +92,7 @@ describe('Phase 6B — tasks.list pagination contract', () => {
           title: `pagination task ${i}`,
         },
         actorId: FIXTURE_ACTOR_ID,
+        workspaceId: FIXTURE_WORKSPACE_ID,
       });
     }
   }
@@ -142,6 +144,38 @@ describe('Phase 6B — tasks.list pagination contract', () => {
     // Disjoint pages — no shared ids.
     const ids1 = new Set(b1.tasks.map((t) => t.id));
     for (const t of b2.tasks) expect(ids1.has(t.id)).toBe(false);
+  });
+});
+
+describe('strict pagination — listTasks', () => {
+  it('GET /api/tasks?limit=-1 → 400 validation_error', async () => {
+    const app = buildTestApp();
+    const res = await app.fetch(
+      authGet(`/api/tasks?project_id=${FIXTURE_PROJECT_ID}&limit=-1`),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('validation_error');
+  });
+
+  it('GET /api/tasks?limit=abc → 400 validation_error', async () => {
+    const app = buildTestApp();
+    const res = await app.fetch(
+      authGet(`/api/tasks?project_id=${FIXTURE_PROJECT_ID}&limit=abc`),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('validation_error');
+  });
+
+  it('GET /api/tasks?offset=-1 → 400 validation_error', async () => {
+    const app = buildTestApp();
+    const res = await app.fetch(
+      authGet(`/api/tasks?project_id=${FIXTURE_PROJECT_ID}&offset=-1`),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('validation_error');
   });
 });
 

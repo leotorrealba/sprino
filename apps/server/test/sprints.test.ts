@@ -22,6 +22,7 @@ import {
 import {
   FIXTURE_ACTOR_ID,
   FIXTURE_PROJECT_ID,
+  FIXTURE_WORKSPACE_ID,
   FIXTURE_TOKEN,
   buildTestApp,
 } from './setup.ts';
@@ -45,6 +46,7 @@ async function makeTask(title: string): Promise<string> {
   const res = await createTask(db, {
     req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title },
     actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
   });
   return res.task.id;
 }
@@ -224,6 +226,142 @@ describe('D4-P2: assignToSprint guards', () => {
   });
 });
 
+describe('EC-4: assignToSprint phantom multi-sprint guard', () => {
+  it('throws when assigning to a planning sprint while task is in another planning sprint', async () => {
+    const sprintA = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Planning A',
+        starts_on: '2026-05-01',
+        ends_on: '2026-05-14',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const sprintB = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Planning B',
+        starts_on: '2026-05-15',
+        ends_on: '2026-05-28',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const taskId = await makeTask('EC-4 multi-planning');
+    await assignToSprint(db, {
+      req: { operation_id: uuidv7(), sprint_id: sprintA.sprint.id, task_id: taskId },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await expect(
+      assignToSprint(db, {
+        req: { operation_id: uuidv7(), sprint_id: sprintB.sprint.id, task_id: taskId },
+        actorId: FIXTURE_ACTOR_ID,
+      }),
+    ).rejects.toThrow(TaskAlreadyInActiveSprintError);
+  });
+
+  it('throws when assigning to a planning sprint while task is in an active sprint', async () => {
+    const activeSprint = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Active',
+        starts_on: '2026-04-01',
+        ends_on: '2026-04-14',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await activateSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        sprint_id: activeSprint.sprint.id,
+        to_status: 'active',
+        if_match: 1,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const planningSprint = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Planning target',
+        starts_on: '2026-06-01',
+        ends_on: '2026-06-14',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const taskId = await makeTask('EC-4 active then planning');
+    await assignToSprint(db, {
+      req: { operation_id: uuidv7(), sprint_id: activeSprint.sprint.id, task_id: taskId },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await expect(
+      assignToSprint(db, {
+        req: { operation_id: uuidv7(), sprint_id: planningSprint.sprint.id, task_id: taskId },
+        actorId: FIXTURE_ACTOR_ID,
+      }),
+    ).rejects.toThrow(TaskAlreadyInActiveSprintError);
+  });
+
+  it('allows assignment when task is only linked to completed sprints', async () => {
+    const first = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Completed',
+        starts_on: '2026-03-01',
+        ends_on: '2026-03-14',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await activateSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        sprint_id: first.sprint.id,
+        to_status: 'active',
+        if_match: 1,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const taskId = await makeTask('EC-4 carried forward');
+    await assignToSprint(db, {
+      req: { operation_id: uuidv7(), sprint_id: first.sprint.id, task_id: taskId },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await closeSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        sprint_id: first.sprint.id,
+        to_status: 'completed',
+        if_match: 2,
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    const nextSprint = await createSprint(db, {
+      req: {
+        operation_id: uuidv7(),
+        project_id: FIXTURE_PROJECT_ID,
+        name: 'EC-4 Next',
+        starts_on: '2026-06-01',
+        ends_on: '2026-06-14',
+      },
+      actorId: FIXTURE_ACTOR_ID,
+    });
+    await expect(
+      assignToSprint(db, {
+        req: { operation_id: uuidv7(), sprint_id: nextSprint.sprint.id, task_id: taskId },
+        actorId: FIXTURE_ACTOR_ID,
+      }),
+    ).resolves.toMatchObject({ task: { id: taskId } });
+    const rows = await db
+      .select()
+      .from(sprintTasks)
+      .where(and(eq(sprintTasks.sprintId, nextSprint.sprint.id), eq(sprintTasks.taskId, taskId)));
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('D4-P2: closeSprint carry-over', () => {
   it('closeSprint returns incomplete tasks as carry_over_tasks', async () => {
     const created = await createSprint(db, {
@@ -267,7 +405,7 @@ describe('D4-P2: closeSprint carry-over', () => {
 describe('D4-P2: updateTaskPoints', () => {
   it('sets tasks.points field', async () => {
     const taskId = await makeTask('task with points');
-    const taskRes = await getTask(db, { req: { task_id: taskId } });
+    const taskRes = await getTask(db, { req: { task_id: taskId }, workspaceId: FIXTURE_WORKSPACE_ID });
     await updateTaskPoints(db, {
       req: {
         operation_id: uuidv7(),
@@ -276,6 +414,7 @@ describe('D4-P2: updateTaskPoints', () => {
         if_match: taskRes.task.version,
       },
       actorId: FIXTURE_ACTOR_ID,
+      workspaceId: FIXTURE_WORKSPACE_ID,
     });
     const rows = await db
       .select({ points: tasks.points })
@@ -419,7 +558,7 @@ describe('D4-P2: HTTP endpoints', () => {
   it('PATCH /tasks/:id/points → 200', async () => {
     const app = buildTestApp();
     const taskId = await makeTask('HTTP points task');
-    const taskRes = await getTask(db, { req: { task_id: taskId } });
+    const taskRes = await getTask(db, { req: { task_id: taskId }, workspaceId: FIXTURE_WORKSPACE_ID });
     const res = await app.fetch(
       new Request(`http://localhost/api/tasks/${taskId}/points`, {
         method: 'PATCH',
