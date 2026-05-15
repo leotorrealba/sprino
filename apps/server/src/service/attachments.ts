@@ -189,7 +189,7 @@ export async function uploadBytes(
       throw new AttachmentAlreadyFinalizedError(attachmentId);
     }
 
-    if (rows[0].status !== 'pending') {
+    if (rows[0]!.status !== 'pending') {
       throw new AttachmentAlreadyFinalizedError(attachmentId);
     }
 
