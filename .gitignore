@@ -65,3 +65,4 @@ docs/orchestration/
 
 # Graphify analysis output (generated)
 graphify-out/
+.worktrees/
