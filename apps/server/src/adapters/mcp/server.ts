@@ -58,6 +58,7 @@ import {
   EventKindSchema,
   AuditExportNotEnabledError,
   EntitlementLimitError,
+  WorkspaceCreateReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -143,7 +144,20 @@ import {
 import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { exportAuditEvents } from '../../service/audit-export.ts';
 import { assertAuditExportEnabled } from '../../service/entitlements.ts';
-import { resolveWorkspaceById } from '../../service/workspaces.ts';
+import {
+  WorkspaceNotFoundError,
+  WorkspaceSlugConflictError,
+  WorkspaceAdminRequiredError,
+  WorkspaceMemberNotFoundError,
+  WorkspaceLastAdminError,
+  createWorkspace,
+  listWorkspacesForActor,
+  listWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+  resolveWorkspaceById,
+  resolveWorkspaceForActor,
+} from '../../service/workspaces.ts';
 
 type Env = AuthEnv;
 
@@ -161,7 +175,95 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
+const WORKSPACE_ID_PROP = {
+  workspace_id: {
+    type: 'string',
+    format: 'uuid',
+    description:
+      'Workspace to operate in. Omit for single-workspace setups; required when your actor belongs to multiple workspaces.',
+  },
+} as const;
+
 const TOOL_DEFINITIONS = [
+  {
+    name: 'sprino.workspace.list',
+    description:
+      'List all workspaces the calling actor is a member of. Use the returned workspace IDs as workspace_id in subsequent tool calls when your actor belongs to multiple workspaces.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'sprino.workspace.get',
+    description:
+      'Get details for a specific workspace. The calling actor must be a member.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid', description: 'The workspace ID to fetch.' },
+      },
+      required: ['workspace_id'],
+    },
+  },
+  {
+    name: 'sprino.workspace.create',
+    description:
+      'Create a new workspace. The calling actor is automatically added as an admin member.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'slug'],
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 100 },
+        slug: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 50,
+          pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$',
+        },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.list',
+    description:
+      'List all members of a workspace. The calling actor must be a member of the workspace.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.add',
+    description:
+      'Add an actor as a member of a workspace. The calling actor must be a workspace admin.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
+        role: { type: 'string', enum: ['admin', 'member'] },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.remove',
+    description:
+      'Remove a member from a workspace. The calling actor must be a workspace admin. Cannot remove the last admin.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
   {
     name: 'sprino.project.create',
     description:
@@ -171,6 +273,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'slug', 'display_name'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         slug: {
           type: 'string',
@@ -190,7 +293,9 @@ const TOOL_DEFINITIONS = [
     inputSchema: {
       type: 'object',
       additionalProperties: false,
-      properties: {},
+      properties: {
+        ...WORKSPACE_ID_PROP,
+      },
     },
   },
   {
@@ -205,6 +310,7 @@ const TOOL_DEFINITIONS = [
         { required: ['repo_path'] },
       ],
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
         slug: { type: 'string', minLength: 1, maxLength: 64 },
         repo_path: { type: 'string', minLength: 1 },
@@ -219,6 +325,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       required: ['operation_id', 'title'],
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         project_id: { type: 'string', format: 'uuid' },
         repo_path: { type: 'string', minLength: 1 },
@@ -235,7 +342,10 @@ const TOOL_DEFINITIONS = [
     inputSchema: {
       type: 'object',
       required: ['task_id'],
-      properties: { task_id: { type: 'string', format: 'uuid' } },
+      properties: {
+        ...WORKSPACE_ID_PROP,
+        task_id: { type: 'string', format: 'uuid' },
+      },
     },
   },
   {
@@ -246,6 +356,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       required: ['operation_id', 'task_id', 'status', 'if_match'],
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
         status: { enum: ['todo', 'doing', 'done', 'blocked'] },
@@ -298,6 +409,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         kind: { type: 'string', enum: ['human', 'agent'] },
       },
     },
@@ -421,6 +533,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'task_id', 'to_column_id', 'if_match'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
         to_column_id: { type: 'string', format: 'uuid' },
@@ -438,6 +551,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'task_id', 'column_id', 'after_task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
         column_id: { type: 'string', format: 'uuid' },
@@ -454,6 +568,7 @@ const TOOL_DEFINITIONS = [
       required: ['task_id', 'parent_task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         task_id: { type: 'string', format: 'uuid' },
         parent_task_id: { type: ['string', 'null'], format: 'uuid' },
       },
@@ -468,6 +583,7 @@ const TOOL_DEFINITIONS = [
       required: ['task_id', 'blocked_by_task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         task_id: { type: 'string', format: 'uuid' },
         blocked_by_task_id: { type: 'string', format: 'uuid' },
       },
@@ -482,6 +598,7 @@ const TOOL_DEFINITIONS = [
       required: ['task_id', 'blocked_by_task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         task_id: { type: 'string', format: 'uuid' },
         blocked_by_task_id: { type: 'string', format: 'uuid' },
       },
@@ -496,6 +613,7 @@ const TOOL_DEFINITIONS = [
       required: ['task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         task_id: { type: 'string', format: 'uuid' },
       },
     },
@@ -508,6 +626,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'project_id', 'name', 'starts_on', 'ends_on'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         project_id: { type: 'string', format: 'uuid' },
         name: { type: 'string', minLength: 1, maxLength: 200 },
@@ -524,6 +643,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'sprint_id', 'to_status', 'if_match'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         sprint_id: { type: 'string', format: 'uuid' },
         to_status: { type: 'string', enum: ['active', 'completed'] },
@@ -539,6 +659,7 @@ const TOOL_DEFINITIONS = [
       required: ['project_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
         status: { type: 'string', enum: ['planning', 'active', 'completed'] },
       },
@@ -552,6 +673,7 @@ const TOOL_DEFINITIONS = [
       required: ['sprint_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         sprint_id: { type: 'string', format: 'uuid' },
       },
     },
@@ -564,6 +686,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'sprint_id', 'task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         sprint_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
@@ -578,6 +701,7 @@ const TOOL_DEFINITIONS = [
       required: ['sprint_id', 'task_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         sprint_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
       },
@@ -591,6 +715,7 @@ const TOOL_DEFINITIONS = [
       required: ['operation_id', 'task_id', 'if_match'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         operation_id: { type: 'string', format: 'uuid' },
         task_id: { type: 'string', format: 'uuid' },
         points: { type: ['integer', 'null'], minimum: 0 },
@@ -606,6 +731,7 @@ const TOOL_DEFINITIONS = [
       required: ['project_id', 'name', 'filters'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
         name: { type: 'string', minLength: 1, maxLength: 100 },
         filters: { type: 'object' },
@@ -620,6 +746,7 @@ const TOOL_DEFINITIONS = [
       required: ['project_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
       },
     },
@@ -632,6 +759,7 @@ const TOOL_DEFINITIONS = [
       required: ['view_id', 'project_id'],
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         view_id: { type: 'string', format: 'uuid' },
         project_id: { type: 'string', format: 'uuid' },
       },
@@ -644,6 +772,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
         name: { type: 'string', minLength: 1, maxLength: 200 },
         trigger_field: { type: 'string', enum: ['status', 'assignee_id'] },
@@ -661,6 +790,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         project_id: { type: 'string', format: 'uuid' },
       },
       required: ['project_id'],
@@ -673,6 +803,7 @@ const TOOL_DEFINITIONS = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        ...WORKSPACE_ID_PROP,
         rule_id: { type: 'string', format: 'uuid' },
         project_id: { type: 'string', format: 'uuid' },
       },
@@ -764,6 +895,59 @@ async function dispatch(
   throw new RpcMethodError(-32601, `Method not found: ${rpc.method}`);
 }
 
+async function resolveWorkspaceForMcp(
+  db: Db,
+  actorId: string,
+  args: unknown,
+): Promise<string> {
+  const wsId = (args as Record<string, unknown> | null | undefined)?.workspace_id;
+  if (typeof wsId === 'string') {
+    const resolved = await resolveWorkspaceById(db, { workspaceId: wsId, actorId });
+    if (!resolved) throw new RpcMethodError(-32003, 'workspace_not_found_or_not_member');
+    return resolved.workspaceId;
+  }
+  const resolution = await resolveWorkspaceForActor(db, actorId);
+  if (resolution.kind === 'resolved') return resolution.workspaceId;
+  throw new RpcMethodError(-32003, 'workspace_id_required', {
+    hint: 'Call sprino.workspace.list to get your workspace IDs, then pass workspace_id in tool arguments.',
+  });
+}
+
+// Tools that bypass workspace resolution (manage workspaces themselves or are global)
+const WORKSPACE_BYPASS = new Set([
+  'sprino.workspace.list',
+  'sprino.workspace.get',
+  'sprino.workspace.create',
+  'sprino.workspace.member.list',
+  'sprino.workspace.member.add',
+  'sprino.workspace.member.remove',
+  'sprino.actor.register',
+  'sprino.actor.get',
+  'sprino.actor.heartbeat',
+  'sprino.actor.revoke_token',
+  'sprino.actor.deactivate',
+  'sprino.attachment.create_upload',
+  'sprino.attachment.finalize',
+  'sprino.attachment.get',
+  'sprino.attachment.list',
+  'audit.export', // audit.export handles its own workspace resolution via explicit workspaceId param
+]);
+
+/**
+ * Strip workspace_id from tool args before passing to strict domain schemas.
+ * Multi-workspace callers include workspace_id in args (for routing), but the
+ * underlying Zod schemas use .strict() / additionalProperties: false and will
+ * reject the extra field. Stripping it here keeps the routing concern out of
+ * every individual case branch.
+ */
+function stripWorkspaceId(args: unknown): unknown {
+  if (args !== null && typeof args === 'object' && 'workspace_id' in args) {
+    const { workspace_id: _, ...rest } = args as Record<string, unknown>;
+    return rest;
+  }
+  return args;
+}
+
 async function callTool(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   c: any,
@@ -773,44 +957,100 @@ async function callTool(
   const db: Db = c.get('db');
   const actor: ActorEntry = c.get('actor');
 
+  let workspaceId: string = DEFAULT_WORKSPACE_ID;
+  if (!WORKSPACE_BYPASS.has(name)) {
+    workspaceId = await resolveWorkspaceForMcp(db, actor.id, args);
+    args = stripWorkspaceId(args);
+  }
+
   switch (name) {
+    case 'sprino.workspace.list': {
+      const res = await listWorkspacesForActor(db, actor.id);
+      return wrapToolResult(res);
+    }
+    case 'sprino.workspace.get': {
+      const { workspace_id } = z.object({ workspace_id: z.string().uuid() }).parse(args);
+      const { workspaces: all } = await listWorkspacesForActor(db, actor.id);
+      const ws = all.find((w) => w.id === workspace_id);
+      if (!ws) throw new RpcMethodError(-32003, 'workspace_not_found_or_not_member');
+      return wrapToolResult({ workspace: ws });
+    }
+    case 'sprino.workspace.create': {
+      const req = WorkspaceCreateReqSchema.parse(args);
+      const res = await createWorkspace(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.workspace.member.list': {
+      const { workspace_id } = z.object({ workspace_id: z.string().uuid() }).parse(args);
+      const res = await listWorkspaceMembers(db, { workspaceId: workspace_id, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.workspace.member.add': {
+      const { workspace_id, actor_id, role } = z
+        .object({
+          workspace_id: z.string().uuid(),
+          actor_id: z.string().uuid(),
+          role: z.enum(['admin', 'member']).optional(),
+        })
+        .parse(args);
+      await addWorkspaceMember(db, {
+        workspaceId: workspace_id,
+        req: { actor_id, role },
+        adminActorId: actor.id,
+      });
+      return wrapToolResult({ ok: true });
+    }
+    case 'sprino.workspace.member.remove': {
+      const { workspace_id, actor_id } = z
+        .object({
+          workspace_id: z.string().uuid(),
+          actor_id: z.string().uuid(),
+        })
+        .parse(args);
+      await removeWorkspaceMember(db, {
+        workspaceId: workspace_id,
+        actorId: actor_id,
+        adminActorId: actor.id,
+      });
+      return wrapToolResult({ ok: true });
+    }
     case 'sprino.project.create': {
       const req = ProjectCreateReqSchema.parse(args);
-      const res = await createProject(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5): workspace from actor context
+      const res = await createProject(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.project.list': {
-      const res = await listProjects(db, { workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await listProjects(db, { workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.project.get': {
       const req = ProjectGetReqSchema.parse(args ?? {});
-      const res = await getProject(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await getProject(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.create': {
       const req = TaskCreateReqSchema.parse(args);
-      const res = await createTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await createTask(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.get': {
       const req = TaskGetReqSchema.parse(args);
-      const res = await getTask(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await getTask(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.update_status': {
       const req = TaskUpdateStatusReqSchema.parse(args);
-      const res = await updateTaskStatus(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await updateTaskStatus(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.transition_workflow': {
       const req = TaskTransitionWorkflowReqSchema.parse(args);
-      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await transitionTaskWorkflow(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.reorder': {
       const req = TaskReorderReqSchema.parse(args);
-      const res = await reorderTask(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await reorderTask(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.set_parent': {
@@ -819,7 +1059,7 @@ async function callTool(
         taskId: req.task_id,
         parentTaskId: req.parent_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult(res);
     }
@@ -829,7 +1069,7 @@ async function callTool(
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult(res);
     }
@@ -839,7 +1079,7 @@ async function callTool(
         fromTaskId: req.task_id,
         toTaskId: req.blocked_by_task_id,
         actorId: actor.id,
-        workspaceId: DEFAULT_WORKSPACE_ID, // TODO(E1-P5)
+        workspaceId,
       });
       return wrapToolResult({ ok: true });
     }
@@ -855,7 +1095,7 @@ async function callTool(
     }
     case 'sprino.actor.list': {
       const req = ActorListReqSchema.parse(args ?? {});
-      const res = await listActors(db, { req, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await listActors(db, { req, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.actor.get': {
@@ -938,7 +1178,7 @@ async function callTool(
     }
     case 'sprino.task.set_points': {
       const req = UpdateTaskPointsReqSchema.parse(args);
-      const res = await updateTaskPoints(db, { req, actorId: actor.id, workspaceId: DEFAULT_WORKSPACE_ID }); // TODO(E1-P5)
+      const res = await updateTaskPoints(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.saved_view.create': {
@@ -1024,7 +1264,11 @@ function wrapToolResult(payload: unknown): unknown {
 }
 
 class RpcMethodError extends Error {
-  constructor(public readonly code: number, message: string) {
+  constructor(
+    public readonly code: number,
+    message: string,
+    public readonly data?: Record<string, unknown>,
+  ) {
     super(message);
   }
 }
@@ -1050,7 +1294,7 @@ function translateError(
     return rpcError(id, -32602, 'Invalid params', err.issues);
   }
   if (err instanceof RpcMethodError) {
-    return rpcError(id, err.code, err.message);
+    return rpcError(id, err.code, err.message, err.data);
   }
   if (err instanceof ProjectSlugConflictError) {
     return rpcError(id, -32009, 'slug_conflict', { slug: err.slug });
@@ -1166,6 +1410,21 @@ function translateError(
   }
   if (err instanceof AutomationRuleNotFoundError) {
     return rpcError(id, -32004, 'automation_rule_not_found', { rule_id: err.ruleId });
+  }
+  if (err instanceof WorkspaceNotFoundError) {
+    return rpcError(id, -32003, 'workspace_not_found_or_not_member', { workspace_id: err.workspaceId });
+  }
+  if (err instanceof WorkspaceSlugConflictError) {
+    return rpcError(id, -32009, 'slug_conflict', { slug: err.slug });
+  }
+  if (err instanceof WorkspaceAdminRequiredError) {
+    return rpcError(id, -32003, 'workspace_admin_required', { actor_id: err.actorId });
+  }
+  if (err instanceof WorkspaceMemberNotFoundError) {
+    return rpcError(id, -32004, 'member_not_found', { actor_id: err.actorId });
+  }
+  if (err instanceof WorkspaceLastAdminError) {
+    return rpcError(id, -32009, 'last_admin_protected', { workspace_id: err.workspaceId });
   }
   if (err instanceof AuditExportNotEnabledError) {
     return rpcError(id, -32003, 'audit_export_not_enabled', {

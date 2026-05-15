@@ -162,27 +162,49 @@ describe('workspace entitlements', () => {
 
   it('addWorkspaceMember allows role update for existing member even at max_members', async () => {
     const wsId = await seedWorkspace({ slug: 'gated-members-upsert-ws' });
+    // max_members = 2 so we can have two admins without hitting the limit during setup
     await db.insert(workspacePlans).values({
       workspaceId: wsId,
       plan: 'free',
       maxProjects: 3,
-      maxMembers: 1,
+      maxMembers: 2,
       auditExportEnabled: false,
     });
 
     const [actor] = await db.select().from(actors).limit(1);
-    // Solo membership must include admin rights so later addWorkspaceMember can run.
-    await db.insert(workspaceMembers).values({
+    // Insert two admins — we need at least two so we can safely downgrade one.
+    const [actor2] = await db
+      .insert(actors)
+      .values({
+        id: uuidv7(),
+        kind: 'human',
+        displayName: 'Test Actor 2 Upsert',
+      })
+      .returning();
+    await db.insert(workspaceMembers).values([
+      { workspaceId: wsId, actorId: actor!.id, role: 'admin' },
+      { workspaceId: wsId, actorId: actor2!.id, role: 'admin' },
+    ]);
+
+    // Tighten the limit to 2 (already at cap) — updating actor2's role should
+    // bypass the seat count check because actor2 is already a member.
+    await db.insert(workspacePlans).values({
       workspaceId: wsId,
-      actorId: actor!.id,
-      role: 'admin',
+      plan: 'free',
+      maxProjects: 3,
+      maxMembers: 2,
+      auditExportEnabled: false,
+    }).onConflictDoUpdate({
+      target: [workspacePlans.workspaceId],
+      set: { maxMembers: 2 },
     });
 
-    // Updating an existing membership should not consume a new seat vs max_members.
+    // Downgrading actor2 (non-last admin) to member must succeed even though
+    // the workspace is at max_members — no new seat is consumed.
     await expect(
       addWorkspaceMember(db, {
         workspaceId: wsId,
-        req: { actor_id: actor!.id, role: 'member' },
+        req: { actor_id: actor2!.id, role: 'member' },
         adminActorId: actor!.id,
       }),
     ).resolves.toBeUndefined();

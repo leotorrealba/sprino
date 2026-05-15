@@ -168,8 +168,9 @@ export async function addWorkspaceMember(
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
 
   // Target is already a member (upsert path) — does not consume a new seat.
+  // Also fetch role here to reuse in the last-admin guard below, avoiding a second query.
   const [existing] = await db
-    .select({ actorId: workspaceMembers.actorId })
+    .select({ actorId: workspaceMembers.actorId, role: workspaceMembers.role })
     .from(workspaceMembers)
     .where(
       and(
@@ -200,6 +201,26 @@ export async function addWorkspaceMember(
     .limit(1);
   if (!target) throw new ActorNotFoundError(req.actor_id);
 
+  // Guard: if target is currently admin and effective new role is 'member', check they're not the last admin
+  // req.role ?? 'member' mirrors the upsert default, so omitting role also triggers the guard
+  // existing.role is already fetched above — no second query needed
+  if ((req.role ?? 'member') === 'member') {
+    if (existing?.role === 'admin') {
+      const adminRows = await db
+        .select({ actorId: workspaceMembers.actorId })
+        .from(workspaceMembers)
+        .where(
+          and(
+            eq(workspaceMembers.workspaceId, workspaceId),
+            eq(workspaceMembers.role, 'admin'),
+          ),
+        );
+      if (adminRows.length <= 1) {
+        throw new WorkspaceLastAdminError(workspaceId);
+      }
+    }
+  }
+
   await db
     .insert(workspaceMembers)
     .values({
@@ -225,8 +246,19 @@ export async function removeWorkspaceMember(
 ): Promise<void> {
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
 
-  // Guard against removing the last admin when self-removing
-  if (adminActorId === actorId) {
+  // Guard against removing the last admin (regardless of who is calling)
+  const [targetMembership] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.actorId, actorId),
+      ),
+    )
+    .limit(1);
+
+  if (targetMembership?.role === 'admin') {
     const admins = await db
       .select({ actorId: workspaceMembers.actorId })
       .from(workspaceMembers)
