@@ -58,6 +58,7 @@ import {
   EventKindSchema,
   AuditExportNotEnabledError,
   EntitlementLimitError,
+  WorkspaceCreateReqSchema,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -149,7 +150,11 @@ import {
   WorkspaceAdminRequiredError,
   WorkspaceMemberNotFoundError,
   WorkspaceLastAdminError,
+  createWorkspace,
   listWorkspacesForActor,
+  listWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
   resolveWorkspaceById,
   resolveWorkspaceForActor,
 } from '../../service/workspaces.ts';
@@ -196,6 +201,67 @@ const TOOL_DEFINITIONS = [
         workspace_id: { type: 'string', format: 'uuid', description: 'The workspace ID to fetch.' },
       },
       required: ['workspace_id'],
+    },
+  },
+  {
+    name: 'sprino.workspace.create',
+    description:
+      'Create a new workspace. The calling actor is automatically added as an admin member.',
+    inputSchema: {
+      type: 'object',
+      required: ['name', 'slug'],
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 100 },
+        slug: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 50,
+          pattern: '^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$',
+        },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.list',
+    description:
+      'List all members of a workspace. The calling actor must be a member of the workspace.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.add',
+    description:
+      'Add an actor as a member of a workspace. The calling actor must be a workspace admin.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
+        role: { type: 'string', enum: ['admin', 'member'] },
+      },
+    },
+  },
+  {
+    name: 'sprino.workspace.member.remove',
+    description:
+      'Remove a member from a workspace. The calling actor must be a workspace admin. Cannot remove the last admin.',
+    inputSchema: {
+      type: 'object',
+      required: ['workspace_id', 'actor_id'],
+      additionalProperties: false,
+      properties: {
+        workspace_id: { type: 'string', format: 'uuid' },
+        actor_id: { type: 'string', format: 'uuid' },
+      },
     },
   },
   {
@@ -890,6 +956,45 @@ async function callTool(
       const ws = all.find((w) => w.id === workspace_id);
       if (!ws) throw new RpcMethodError(-32003, 'workspace_not_found_or_not_member');
       return wrapToolResult({ workspace: ws });
+    }
+    case 'sprino.workspace.create': {
+      const req = WorkspaceCreateReqSchema.parse(args);
+      const res = await createWorkspace(db, { req, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.workspace.member.list': {
+      const { workspace_id } = z.object({ workspace_id: z.string().uuid() }).parse(args);
+      const res = await listWorkspaceMembers(db, { workspaceId: workspace_id, actorId: actor.id });
+      return wrapToolResult(res);
+    }
+    case 'sprino.workspace.member.add': {
+      const { workspace_id, actor_id, role } = z
+        .object({
+          workspace_id: z.string().uuid(),
+          actor_id: z.string().uuid(),
+          role: z.enum(['admin', 'member']).optional(),
+        })
+        .parse(args);
+      await addWorkspaceMember(db, {
+        workspaceId: workspace_id,
+        req: { actor_id, role },
+        adminActorId: actor.id,
+      });
+      return wrapToolResult({ ok: true });
+    }
+    case 'sprino.workspace.member.remove': {
+      const { workspace_id, actor_id } = z
+        .object({
+          workspace_id: z.string().uuid(),
+          actor_id: z.string().uuid(),
+        })
+        .parse(args);
+      await removeWorkspaceMember(db, {
+        workspaceId: workspace_id,
+        actorId: actor_id,
+        adminActorId: actor.id,
+      });
+      return wrapToolResult({ ok: true });
     }
     case 'sprino.project.create': {
       const req = ProjectCreateReqSchema.parse(args);

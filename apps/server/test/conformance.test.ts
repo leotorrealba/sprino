@@ -404,8 +404,12 @@ describe('MCP-over-HTTP adapter — same business logic, JSON-RPC envelope', () 
       'sprino.task.set_points',
       'sprino.task.transition_workflow',
       'sprino.task.update_status',
+      'sprino.workspace.create',
       'sprino.workspace.get',
       'sprino.workspace.list',
+      'sprino.workspace.member.add',
+      'sprino.workspace.member.list',
+      'sprino.workspace.member.remove',
     ]);
 
     const actorRegister = body.result.tools.find(
