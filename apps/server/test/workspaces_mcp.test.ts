@@ -459,6 +459,29 @@ describe('MCP sprino.workspace.member.add', () => {
     expect(body.error!.message).toBe('last_admin_protected');
   });
 
+  it('omitting role (defaults to member) also triggers last_admin_protected', async () => {
+    const app = buildTestApp();
+    const createRes = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.workspace.create', { name: 'Omit Role WS', slug: 'omit-role-ws' }),
+    );
+    const createBody = (await createRes.json()) as {
+      result?: { structuredContent: { workspace: { id: string } } };
+    };
+    const wsId = createBody.result!.structuredContent.workspace.id;
+
+    // Omit role — effective role defaults to 'member', should still guard
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.workspace.member.add', {
+        workspace_id: wsId,
+        actor_id: FIXTURE_ACTOR_ID,
+      }),
+    );
+    const body = (await res.json()) as { error?: { code: number; message: string } };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32009);
+    expect(body.error!.message).toBe('last_admin_protected');
+  });
+
   it('exceeding max_members → entitlement_limit error', async () => {
     const app = buildTestApp();
     // Create workspace with fixture actor (becomes admin, 1 member)

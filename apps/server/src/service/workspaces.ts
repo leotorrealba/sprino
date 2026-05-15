@@ -200,8 +200,9 @@ export async function addWorkspaceMember(
     .limit(1);
   if (!target) throw new ActorNotFoundError(req.actor_id);
 
-  // Guard: if target is currently admin and new role is 'member', check they're not the last admin
-  if (req.role === 'member') {
+  // Guard: if target is currently admin and effective new role is 'member', check they're not the last admin
+  // req.role ?? 'member' mirrors the upsert default, so omitting role also triggers the guard
+  if ((req.role ?? 'member') === 'member') {
     const [currentMembership] = await db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
