@@ -926,8 +926,27 @@ const WORKSPACE_BYPASS = new Set([
   'sprino.actor.heartbeat',
   'sprino.actor.revoke_token',
   'sprino.actor.deactivate',
+  'sprino.attachment.create_upload',
+  'sprino.attachment.finalize',
+  'sprino.attachment.get',
+  'sprino.attachment.list',
   'audit.export', // audit.export handles its own workspace resolution via explicit workspaceId param
 ]);
+
+/**
+ * Strip workspace_id from tool args before passing to strict domain schemas.
+ * Multi-workspace callers include workspace_id in args (for routing), but the
+ * underlying Zod schemas use .strict() / additionalProperties: false and will
+ * reject the extra field. Stripping it here keeps the routing concern out of
+ * every individual case branch.
+ */
+function stripWorkspaceId(args: unknown): unknown {
+  if (args !== null && typeof args === 'object' && 'workspace_id' in args) {
+    const { workspace_id: _, ...rest } = args as Record<string, unknown>;
+    return rest;
+  }
+  return args;
+}
 
 async function callTool(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -941,6 +960,7 @@ async function callTool(
   let workspaceId: string = DEFAULT_WORKSPACE_ID;
   if (!WORKSPACE_BYPASS.has(name)) {
     workspaceId = await resolveWorkspaceForMcp(db, actor.id, args);
+    args = stripWorkspaceId(args);
   }
 
   switch (name) {

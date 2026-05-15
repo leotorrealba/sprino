@@ -431,6 +431,34 @@ describe('MCP sprino.workspace.member.add', () => {
     expect(body.error!.message).toBe('workspace_admin_required');
   });
 
+  it('downgrading last admin to member → last_admin_protected', async () => {
+    const app = buildTestApp();
+    // Create workspace — fixture actor is the only admin
+    const createRes = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.workspace.create', { name: 'Downgrade Admin WS', slug: 'downgrade-admin-ws' }),
+    );
+    const createBody = (await createRes.json()) as {
+      result?: { structuredContent: { workspace: { id: string } } };
+    };
+    const wsId = createBody.result!.structuredContent.workspace.id;
+
+    // Attempt to downgrade the only admin (self) to member
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.workspace.member.add', {
+        workspace_id: wsId,
+        actor_id: FIXTURE_ACTOR_ID,
+        role: 'member',
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32009);
+    expect(body.error!.message).toBe('last_admin_protected');
+  });
+
   it('exceeding max_members → entitlement_limit error', async () => {
     const app = buildTestApp();
     // Create workspace with fixture actor (becomes admin, 1 member)

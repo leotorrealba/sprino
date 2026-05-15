@@ -200,6 +200,34 @@ export async function addWorkspaceMember(
     .limit(1);
   if (!target) throw new ActorNotFoundError(req.actor_id);
 
+  // Guard: if target is currently admin and new role is 'member', check they're not the last admin
+  if (req.role === 'member') {
+    const [currentMembership] = await db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          eq(workspaceMembers.actorId, req.actor_id),
+        ),
+      )
+      .limit(1);
+    if (currentMembership?.role === 'admin') {
+      const adminRows = await db
+        .select({ actorId: workspaceMembers.actorId })
+        .from(workspaceMembers)
+        .where(
+          and(
+            eq(workspaceMembers.workspaceId, workspaceId),
+            eq(workspaceMembers.role, 'admin'),
+          ),
+        );
+      if (adminRows.length <= 1) {
+        throw new WorkspaceLastAdminError(workspaceId);
+      }
+    }
+  }
+
   await db
     .insert(workspaceMembers)
     .values({
