@@ -70,22 +70,15 @@ export const workspaceAuth: MiddlewareHandler<AuthEnv> = async (c, next) => {
     return next();
   }
 
-  // No header — try auto-select
+  // No header — try auto-select (single membership includes name/slug in one query)
   const resolution = await resolveWorkspaceForActor(db, actor.id);
   if (resolution.kind === 'resolved') {
-    // Fetch workspace name/slug for context
-    const resolved = await resolveWorkspaceById(db, {
-      workspaceId: resolution.workspaceId,
-      actorId: actor.id,
+    c.set('workspace', {
+      id: resolution.workspaceId,
+      name: resolution.name,
+      slug: resolution.slug,
+      role: resolution.role,
     });
-    if (resolved) {
-      c.set('workspace', {
-        id: resolved.workspaceId,
-        name: resolved.name,
-        slug: resolved.slug,
-        role: resolved.role,
-      });
-    }
     return next();
   }
 

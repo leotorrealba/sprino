@@ -4,7 +4,7 @@
  * Workspace CRUD + membership management.
  */
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, count, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { actors, workspaces, workspaceMembers } from '../db/schema.ts';
@@ -18,7 +18,9 @@ import type {
   WorkspaceMemberAddReq,
   WorkspaceMemberListRes,
 } from '../domain/index.ts';
+import { EntitlementLimitError } from '../domain/index.ts';
 import { ActorNotFoundError } from './actors.ts';
+import { getWorkspacePlan } from './entitlements.ts';
 
 // ── Errors ───────────────────────────────────────────────────────────────
 
@@ -165,6 +167,31 @@ export async function addWorkspaceMember(
 ): Promise<void> {
   await assertWorkspaceAdmin(db, { workspaceId, actorId: adminActorId });
 
+  // Target is already a member (upsert path) — does not consume a new seat.
+  const [existing] = await db
+    .select({ actorId: workspaceMembers.actorId })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.actorId, req.actor_id),
+      ),
+    )
+    .limit(1);
+
+  // Only enforce max_members for net-new memberships
+  if (!existing) {
+    const plan = await getWorkspacePlan(db, workspaceId);
+    const [memberCountRow] = await db
+      .select({ count: count() })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.workspaceId, workspaceId));
+    const memberCount = memberCountRow?.count ?? 0;
+    if (Number(memberCount) >= plan.max_members) {
+      throw new EntitlementLimitError('members', plan.max_members);
+    }
+  }
+
   // Verify target actor exists
   const [target] = await db
     .select({ id: actors.id })
@@ -263,7 +290,13 @@ export async function listWorkspaceMembers(
 // ── Auth middleware helpers ────────────────────────────────────────────────
 
 export type WorkspaceResolution =
-  | { kind: 'resolved'; workspaceId: string; role: 'admin' | 'member' }
+  | {
+      kind: 'resolved';
+      workspaceId: string;
+      name: string;
+      slug: string;
+      role: 'admin' | 'member';
+    }
   | { kind: 'none' }
   | { kind: 'ambiguous' };
 
@@ -272,16 +305,30 @@ export async function resolveWorkspaceForActor(
   actorId: string,
 ): Promise<WorkspaceResolution> {
   const rows = await db
-    .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
-    .from(workspaceMembers)
-    .where(eq(workspaceMembers.actorId, actorId))
-    .limit(3);  // only need to distinguish 0, 1, vs 2+
+    .select({
+      workspaceId: workspaces.id,
+      name: workspaces.name,
+      slug: workspaces.slug,
+      role: workspaceMembers.role,
+    })
+    .from(workspaces)
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.workspaceId, workspaces.id),
+        eq(workspaceMembers.actorId, actorId),
+      ),
+    )
+    .limit(3); // only need to distinguish 0, 1, vs 2+
 
   if (rows.length === 1) {
+    const r = rows[0]!;
     return {
       kind: 'resolved',
-      workspaceId: rows[0]!.workspaceId,
-      role: rows[0]!.role,
+      workspaceId: r.workspaceId,
+      name: r.name,
+      slug: r.slug,
+      role: r.role,
     };
   }
   if (rows.length === 0) return { kind: 'none' };

@@ -56,6 +56,8 @@ import {
   SavedViewCreateReqSchema,
   AutomationRuleCreateReqSchema,
   EventKindSchema,
+  AuditExportNotEnabledError,
+  EntitlementLimitError,
 } from '../../domain/index.ts';
 import {
   AttachmentNotFoundError,
@@ -140,6 +142,7 @@ import {
 } from '../../service/actors.ts';
 import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { exportAuditEvents } from '../../service/audit-export.ts';
+import { assertAuditExportEnabled } from '../../service/entitlements.ts';
 import { resolveWorkspaceById } from '../../service/workspaces.ts';
 
 type Env = AuthEnv;
@@ -991,6 +994,7 @@ async function callTool(
       if (!member) {
         throw new RpcMethodError(-32003, 'forbidden');
       }
+      await assertAuditExportEnabled(db, parsed.workspaceId);
       const res = await exportAuditEvents(db, {
         workspaceId: parsed.workspaceId,
         actorId: parsed.actorId,
@@ -1162,6 +1166,17 @@ function translateError(
   }
   if (err instanceof AutomationRuleNotFoundError) {
     return rpcError(id, -32004, 'automation_rule_not_found', { rule_id: err.ruleId });
+  }
+  if (err instanceof AuditExportNotEnabledError) {
+    return rpcError(id, -32003, 'audit_export_not_enabled', {
+      workspace_id: err.workspaceId,
+    });
+  }
+  if (err instanceof EntitlementLimitError) {
+    return rpcError(id, -32003, 'entitlement_limit', {
+      resource: err.resource,
+      limit: err.limit,
+    });
   }
   console.error('Unhandled MCP error:', err);
   return rpcError(id, -32603, 'Internal error');

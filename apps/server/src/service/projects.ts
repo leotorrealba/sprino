@@ -7,7 +7,7 @@
  * ordering, row conversion, and project reference resolution.
  */
 
-import { asc, eq } from 'drizzle-orm';
+import { asc, count, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
 import { projects, workflowColumns, workflowTransitions } from '../db/schema.ts';
@@ -23,11 +23,13 @@ import type {
   ProjectGetRes,
   ProjectListRes,
 } from '../domain/index.ts';
+import { EntitlementLimitError } from '../domain/index.ts';
 import {
   checkIdempotency,
   hashRequest,
   recordOperation,
 } from './idempotency.ts';
+import { getWorkspacePlan } from './entitlements.ts';
 import { assertProjectInWorkspace } from './authorization.ts';
 
 type ProjectLookupRef = {
@@ -206,6 +208,16 @@ export async function createProject(
   const requestHash = hashRequest(req);
   const cached = await checkIdempotency(db, req.operation_id, requestHash);
   if (cached !== null) return cached as ProjectCreateRes;
+
+  const plan = await getWorkspacePlan(db, workspaceId);
+  const [projectCountRow] = await db
+    .select({ count: count() })
+    .from(projects)
+    .where(eq(projects.workspaceId, workspaceId));
+  const projectCount = projectCountRow?.count ?? 0;
+  if (Number(projectCount) >= plan.max_projects) {
+    throw new EntitlementLimitError('projects', plan.max_projects);
+  }
 
   // Pre-check slug uniqueness outside the transaction so the error is clean.
   const existing = await db

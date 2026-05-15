@@ -76,6 +76,9 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
 - **Want the engineering details?** Read
   [`docs/TECHNICAL.md`](./docs/TECHNICAL.md) — architecture, data model,
   request flow, and operational concerns.
+- **Architecture decisions (ADRs):** [`docs/adr/`](./docs/adr/) — for example
+  [ADR 0001](./docs/adr/0001-e1-e2-e3-workspace-audit-entitlements.md) on
+  workspace resolution, audit export isolation, and plan entitlements (E1–E3).
 
 ### Day-2 docs
 

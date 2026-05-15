@@ -867,3 +867,36 @@ export const WorkspaceMemberListResSchema = z.object({
   members: z.array(WorkspaceMemberSchema),
 });
 export type WorkspaceMemberListRes = z.infer<typeof WorkspaceMemberListResSchema>;
+
+// ── E3: Workspace plan / entitlements ────────────────────────────────────
+
+export const PlanSchema = z.enum(['free', 'pro', 'enterprise']);
+
+export const WorkspacePlanSchema = z.object({
+  workspace_id: uuid,
+  plan: PlanSchema,
+  max_projects: z.number().int().positive(),
+  max_members: z.number().int().positive(),
+  audit_export_enabled: z.boolean(),
+  updated_at: isoDateTime,
+});
+export type WorkspacePlan = z.infer<typeof WorkspacePlanSchema>;
+
+export class EntitlementLimitError extends Error {
+  constructor(
+    public readonly resource: string,
+    public readonly limit: number,
+  ) {
+    super(
+      `Workspace has reached the ${resource} limit of ${limit} for its current plan`,
+    );
+    this.name = 'EntitlementLimitError';
+  }
+}
+
+export class AuditExportNotEnabledError extends Error {
+  constructor(public readonly workspaceId: string) {
+    super(`Audit export is not enabled for workspace ${workspaceId}`);
+    this.name = 'AuditExportNotEnabledError';
+  }
+}

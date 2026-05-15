@@ -63,6 +63,8 @@ import {
   AutomationRuleCreateReqSchema,
   WorkspaceCreateReqSchema,
   WorkspaceMemberAddReqSchema,
+  AuditExportNotEnabledError,
+  EntitlementLimitError,
 } from '../../domain/index.ts';
 import {
   AttachmentAlreadyFinalizedError,
@@ -118,7 +120,12 @@ import {
   listWorkspaceMembers,
   addWorkspaceMember,
   removeWorkspaceMember,
+  resolveWorkspaceById,
 } from '../../service/workspaces.ts';
+import {
+  assertAuditExportEnabled,
+  getWorkspacePlan,
+} from '../../service/entitlements.ts';
 import {
   ChildrenNotDoneError,
   CrossProjectRelationError,
@@ -614,6 +621,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
+      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,
@@ -639,6 +647,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
+      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,
@@ -1023,6 +1032,27 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   // context header. The service functions verify the caller is a member of the
   // *requested* workspace before acting (preventing IDOR cross-workspace access).
 
+  api.get('/workspaces/:workspaceId/plan', async (c) => {
+    try {
+      const workspaceId = c.req.param('workspaceId');
+      const headerWs = c.req.header('x-workspace-id');
+      if (headerWs && headerWs !== workspaceId) {
+        return c.json({ error: 'workspace_id_mismatch' }, 400);
+      }
+      const access = await resolveWorkspaceById(c.get('db'), {
+        workspaceId,
+        actorId: c.get('actor').id,
+      });
+      if (!access) {
+        return c.json({ error: 'workspace_not_found_or_not_member' }, 403);
+      }
+      const plan = await getWorkspacePlan(c.get('db'), workspaceId);
+      return c.json(plan, 200);
+    } catch (err) {
+      return workspaceErrorResponse(c, err);
+    }
+  });
+
   api.get('/workspaces/:id/members', async (c) => {
     try {
       const res = await listWorkspaceMembers(c.get('db'), {
@@ -1085,6 +1115,12 @@ function workspaceErrorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof WorkspaceLastAdminError) {
     return c.json({ error: 'workspace_last_admin' }, 409);
+  }
+  if (err instanceof EntitlementLimitError) {
+    return c.json(
+      { error: 'entitlement_limit', resource: err.resource, limit: err.limit },
+      403,
+    );
   }
   console.error('Unhandled workspace error:', err);
   return c.json({ error: 'internal_error' }, 500);
@@ -1422,6 +1458,18 @@ function errorResponse(c: any, err: unknown): Response {
   }
   if (err instanceof AutomationRuleNotFoundError) {
     return c.json({ error: 'automation_rule_not_found', rule_id: err.ruleId }, 404);
+  }
+  if (err instanceof AuditExportNotEnabledError) {
+    return c.json(
+      { error: 'audit_export_not_enabled', workspace_id: err.workspaceId },
+      403,
+    );
+  }
+  if (err instanceof EntitlementLimitError) {
+    return c.json(
+      { error: 'entitlement_limit', resource: err.resource, limit: err.limit },
+      403,
+    );
   }
   if (err instanceof WorkspaceIsolationError) {
     return c.json(
