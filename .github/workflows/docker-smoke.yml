@@ -17,6 +17,8 @@ on:
       - 'docker-compose.yml'
       - 'bootstrap.sh'
       - 'scripts/smoke.sh'
+      - 'apps/**'
+      - 'packages/**'
 
 jobs:
   docker-smoke:
