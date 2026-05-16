@@ -45,6 +45,7 @@ import {
   SetParentReqSchema,
   TaskReorderReqSchema,
   TaskUpdateStatusReqSchema,
+  TaskUpdateReqSchema,
   TaskTransitionWorkflowReqSchema,
   ActorRegisterReqSchema,
   ActorListReqSchema,
@@ -150,6 +151,7 @@ import {
   reorderTask,
   setParent,
   transitionTaskWorkflow,
+  updateTask,
   updateTaskPoints,
   updateTaskStatus,
 } from '../../service/tasks.ts';
@@ -434,6 +436,22 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       });
       const actor = c.get('actor');
       const res = await updateTaskStatus(c.get('db'), {
+        req,
+        actorId: actor.id,
+        workspaceId: c.get('workspace')!.id,
+      });
+      return c.json(res, 200);
+    } catch (err) {
+      return errorResponse(c, err);
+    }
+  });
+
+  ws.patch('/tasks/:id', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const req = TaskUpdateReqSchema.parse({ ...body, task_id: c.req.param('id') });
+      const actor = c.get('actor');
+      const res = await updateTask(c.get('db'), {
         req,
         actorId: actor.id,
         workspaceId: c.get('workspace')!.id,
