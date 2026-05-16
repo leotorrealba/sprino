@@ -316,7 +316,14 @@ TEST_DATABASE_URL=postgres://sprino:sprino@localhost:5433/sprino_test \
 bun run test
 ```
 
-Current state: 9 test files, 82 tests, all passing.
+Current state: 406 tests across all test files, all passing.
+
+Run the Tessera conformance suite specifically:
+
+```sh
+env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+  bun --filter '@sprino/server' test test/conformance.test.ts
+```
 
 ---
 
@@ -336,6 +343,77 @@ ask: **would a second implementer also need to make the same decision?**
 If you find yourself wanting to relax a Tessera rule to fit a Sprino
 constraint, you are working at the wrong layer — open an issue on Tessera
 instead.
+
+---
+
+## 9b. Tessera integration profile
+
+Sprino implements **Tessera v0.1.5** in full. The table below lists every
+supported verb with its HTTP surface and MCP tool name. 406 tests pass
+against a real Postgres instance, including `conformance.test.ts` which
+replays the Tessera v0.1.5 fixture files from `../tessera/conformance/fixtures/`.
+
+### Tessera v0.1.5 verbs (full conformance)
+
+| Verb | HTTP | MCP tool |
+|------|------|----------|
+| `task.create` | `POST /api/tasks` | `sprino.task.create` |
+| `task.get` | `GET /api/tasks/:id` | `sprino.task.get` |
+| `task.list` | `GET /api/tasks` | `sprino.task.list` |
+| `task.update_status` | `PATCH /api/tasks/:id/status` | `sprino.task.update_status` |
+| `task.update` | `PATCH /api/tasks/:id` | `sprino.task.update` |
+| `event.list` | `GET /api/events` | `sprino.event.list` |
+| `project.list` | `GET /api/projects` | `sprino.project.list` |
+| `project.get` | `GET /api/projects/:id` | `sprino.project.get` |
+| `project.create` | `POST /api/projects` | `sprino.project.create` |
+| `actor.register` | `POST /api/actors` | `sprino.actor.register` |
+| `actor.list` | `GET /api/actors` | `sprino.actor.list` |
+| `actor.get` | `GET /api/actors/:id` | `sprino.actor.get` |
+| `actor.revoke_token` | `DELETE /api/actors/:id/token` | `sprino.actor.revoke_token` |
+| `actor.heartbeat` | `POST /api/actors/:id/heartbeat` | `sprino.actor.heartbeat` |
+| `actor.deactivate` | `POST /api/actors/:id/deactivate` | `sprino.actor.deactivate` |
+| `attachment.create_upload` | `POST /api/tasks/:id/attachments` | `sprino.attachment.create_upload` |
+| (PUT upload) | `PUT /api/attachments/:id/data` | (HTTP only) |
+| `attachment.finalize` | `POST /api/attachments/:id/finalize` | `sprino.attachment.finalize` |
+| `attachment.get` | `GET /api/attachments/:id` | `sprino.attachment.get` |
+| `attachment.list` | `GET /api/tasks/:id/attachments` | `sprino.attachment.list` |
+
+> **Note on `parent_task_id`:** the Tessera v0.1.5 task schema includes a
+> `parent_task_id` field. The full hierarchy service — multi-level nesting,
+> dependency edges, and cycle detection — is a Sprino extension beyond that
+> schema field (see below).
+
+### Sprino extensions (not in the Tessera spec)
+
+These capabilities are Sprino-specific and not part of the Tessera protocol.
+A second Tessera implementer is under no obligation to provide them.
+
+| Extension | HTTP | MCP tool |
+|-----------|------|----------|
+| Workflow state machine | `PATCH /api/tasks/:id/workflow` | `sprino.workflow.transition` |
+| Task reorder | `POST /api/tasks/:id/reorder` | — |
+| Task hierarchy | `PATCH /api/tasks/:id/parent` | — |
+| Task dependencies | `POST /api/tasks/:id/dependencies`, `DELETE /api/tasks/:id/dependencies` | — |
+| Sprint CRUD | `POST /api/projects/:id/sprints`, `GET /api/projects/:id/sprints`, `GET /api/sprints/:id`, `PATCH /api/sprints/:id`, `POST /api/tasks/:id/sprint`, `DELETE /api/tasks/:id/sprint` | — |
+| Saved views | `POST /api/projects/:id/views` | — |
+| Automation rules | `POST /api/projects/:id/automation-rules` | — |
+| Workspace management | `GET /api/workspaces`, `POST /api/workspaces` | `sprino.workspace.list`, `sprino.workspace.get`, `sprino.workspace.member.list` |
+| Audit export | `GET /api/audit/export`, `GET /api/audit/export/csv` | `sprino.audit.export` |
+
+### Conformance testing
+
+```sh
+# Full test suite (requires a running Postgres)
+env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+  bun run test
+
+# Tessera conformance fixtures only
+env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+  bun --filter '@sprino/server' test test/conformance.test.ts
+```
+
+The Tessera spec and conformance fixtures live in the sibling repo
+`../tessera/` (MIT-licensed, separate from this AGPL codebase).
 
 ---
 

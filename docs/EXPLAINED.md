@@ -114,12 +114,13 @@ Setting expectations:
 - **Not a SaaS.** You self-host. There's no "Sign up at sprino.com"
   button. (A hosted version is on the roadmap, but not the focus right
   now.)
-- **Not Jira.** No epics, no story points, no swimlane configurations,
-  no permissions matrix, no workflow builder. Sprino has tasks, status,
-  assignees, and an event log. That's it.
+- **Not Jira.** No story points, no permissions matrix. Sprino has tasks,
+  status, assignees, sprints, a Kanban board, an event log, and saved
+  views. That’s it.
 - **Multi-workspace on your own server, not a shared SaaS.** One Sprino
-  install can host **several workspaces** (separate teams or divisions)
-  with isolated projects and audit data. What you don’t get yet is a
+  install hosts **several workspaces** (separate teams or divisions) with
+  isolated projects and audit data — and the web UI includes a workspace
+  switcher so you can move between them. What you don’t get yet is a
   hosted “Sprino Cloud” where strangers sign up side by side — that’s
   still planned for a later release.
 - **Not a finished product.** Pre-alpha. Working code, exercised daily
@@ -185,13 +186,64 @@ intentionally refuses to "un-revoke" a previously-revoked token —
 re-introducing the same plaintext is treated as a security smell.
 `docs/TOKEN-RECOVERY.md` is the full playbook.
 
+## What's new in v0.2.0
+
+v0.2.0 is the biggest single release since launch. Everything in the
+previous version still works exactly the same — this list is net-new:
+
+**Workflow and Kanban board.** Tasks no longer just have a status like
+"open" or "closed." Each project can define its own columns (to-do,
+in-progress, review, done — or whatever fits your team). The web UI
+shows a drag-and-drop Kanban board. When you move a card, that move is
+recorded in the event log just like any other change.
+
+**Sprints and iterations.** You can create named sprints, set start and
+end dates, and assign tasks to a sprint. The UI shows a burndown so
+you can see how much work is left at any point in the sprint. Task-to-
+sprint assignment is a separate record from the task itself, so you
+can move a task between sprints without losing its history.
+
+**Task hierarchy and dependencies.** Tasks can have parent tasks and
+child tasks — useful for breaking a big piece of work into smaller
+steps that are all tracked together. Tasks can also declare that they
+block (or are blocked by) other tasks. Sprino enforces that you don't
+accidentally create a dependency loop (where A blocks B blocks A).
+
+**Search and saved views.** A search bar lets you filter tasks by title
+keyword. You can save any filter as a named view — "my open tasks," "all
+review-needed tasks," or whatever you like — and switch to it in one
+click. Per-project automation rules let you say things like "whenever a
+task enters column X, assign it to agent Y" or "whenever a task is
+created, move it to column Z."
+
+**Multi-workspace tenancy.** One Sprino install now properly isolates
+multiple workspaces (separate teams, separate data). The web app has a
+workspace switcher in the top bar. API clients send an
+`X-Workspace-ID` header to say which workspace they're acting in. Each
+workspace has its own membership list and its own audit history.
+
+**Audit export.** Everything that ever happened in a workspace can be
+downloaded from `GET /api/audit/export` as JSON (full records with
+payloads) or as CSV (a flat table of ids, timestamps, and event kinds —
+handy for spreadsheets or SIEM tools). Export is gated: only members of
+the workspace can pull its audit log, and only on plans where audit
+export is turned on.
+
+**Usage limits (entitlements).** Workspaces can have caps on the number
+of projects and members. This is the foundation for plan tiers — for
+now it's mostly used to make sure a shared install doesn't accidentally
+grow without bound.
+
 ## Where to go from here
 
 - **You want to try it:** [README](../README.md) → "Self-host (30 minutes,
   end-to-end)".
 - **You want the engineering details:** [`TECHNICAL.md`](./TECHNICAL.md).
-- **You want to know what's coming:** [`CHANGELOG.md`](../CHANGELOG.md)
-  → "Unreleased".
-- **You want to contribute:** [`CONTRIBUTING.md`](../CONTRIBUTING.md).
-- **You want to know what the protocol looks like:**
-  [Tessera README](https://github.com/leotorrealba/tessera).
+- **You want the full list of changes:** [`CHANGELOG.md`](../CHANGELOG.md).
+- **You want to understand the Tessera protocol Sprino speaks:**
+  [`TECHNICAL.md` — Tessera integration profile](./TECHNICAL.md#9b-tessera-integration-profile)
+  or [the Tessera spec directly](https://github.com/leotorrealba/tessera/blob/main/SPEC.md).
+- **You want to contribute:** [`CONTRIBUTING.md`](../CONTRIBUTING.md) and
+  [`docs/git-workflow.md`](./git-workflow.md).
+- **You want to back up your data:** [`docs/RESTORE.md`](./RESTORE.md).
+- **You need to rotate or recover tokens:** [`docs/TOKEN-ROTATION.md`](./TOKEN-ROTATION.md).
