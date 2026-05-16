@@ -6,6 +6,34 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
+## [v0.3.0] — 2026-05-16
+
+### Added
+
+- **Observability instrumentation (E4-P1)** — `service/telemetry.ts` module with
+  in-memory request counters (`requests_total`, `requests_by_status`,
+  `errors_total`) and MCP tool counters (`mcp_calls_total`, `mcp_errors_total`).
+  Per-request structured JSON log to stdout. `GET /api/metrics` endpoint (Bearer
+  required). `/healthz` updated to report `version: 0.3.0`.
+- **SLO smoke-check script (E4-P2)** — `apps/server/scripts/smoke-check.ts`
+  programmatic SLO checker: asserts `/healthz` responds in <500 ms and
+  `/api/projects` in <1000 ms. Run with
+  `SERVER_URL=... BEARER_TOKEN=... bun run apps/server/scripts/smoke-check.ts`.
+  Healthz endpoint updated to `version: 0.3.0`, `protocol: tessera/v0.1.5`.
+- **Release gate checklist (E4-P3)** — `scripts/release-checklist.sh` POSIX
+  script with seven gates: git clean, on-main check, CHANGELOG entry, README
+  version reference, typecheck, tests, and optional `gh` CLI reachability.
+  Exits 0 only if all gates pass. Run with
+  `VERSION=vX.Y.Z sh scripts/release-checklist.sh`.
+- **Tessera integration profile (E5-P1)** — `docs/TECHNICAL.md` §9b: complete
+  table of all 20 Tessera v0.1.5 HTTP+MCP surfaces and all Sprino extensions not
+  in the spec (workflow, sprints, hierarchy, deps, saved views, automation,
+  workspace management, audit export). Conformance testing commands included.
+  `docs/EXPLAINED.md` updated to reflect the v0.2.0 feature set.
+- **Onboarding hardening (E5-P2)** — `README.md` smoke-check step after stack
+  start, corrected token-rotation known-limitation note. `docs/RESTORE.md`
+  post-restore smoke-check step added.
+
 ## [v0.2.0] — 2026-05-16
 
 ### Added
@@ -231,7 +259,8 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - **No hosted SaaS.** Self-host only. Cloud is on the roadmap, not on the calendar.
 - **macOS / Linux only.** `bootstrap.sh` is bash; Windows users need WSL.
 
-[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/leotorrealba/sprino/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/leotorrealba/sprino/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/leotorrealba/sprino/compare/v0.0.9...v0.1.0
 [v0.0.9]: https://github.com/leotorrealba/sprino/compare/v0.0.7...v0.0.9

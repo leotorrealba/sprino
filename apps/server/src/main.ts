@@ -29,7 +29,7 @@ import { buildMcpRoutes } from './adapters/mcp/server.ts';
 import { recordRequest } from './service/telemetry.ts';
 
 export function healthzHandler(c: Context): Response {
-  return c.json({ ok: true, version: '0.2.0', protocol: 'tessera/v0.1.5' });
+  return c.json({ ok: true, version: '0.3.0', protocol: 'tessera/v0.1.5' });
 }
 
 async function buildApp(): Promise<Hono<AuthEnv>> {

@@ -334,6 +334,12 @@ sh scripts/smoke.sh
 become healthy, hits `/health`, and tears down. A passing smoke run is the
 final signal that the release is shippable.
 
+### Phase E milestone
+
+Phase E (E1–E5) is complete as of v0.3.0. The next planned milestone is public
+announcement readiness — no code gates remain; the project is in
+maintain-and-ship mode.
+
 ## Emergency Override
 
 Direct pushes are blocked. If admin bypass is ever used:
