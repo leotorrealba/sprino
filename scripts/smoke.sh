@@ -23,7 +23,7 @@ die() { printf '[smoke] FATAL: %s\n' "$*" >&2; exit 1; }
 http_get() {
     _url="$1"
     if command -v wget >/dev/null 2>&1; then
-        wget -q --server-response -O /dev/null "$_url" 2>&1 | grep -m1 'HTTP/' | awk '{print $2}'
+        wget -q --server-response -O /dev/null "$_url" 2>&1 | grep 'HTTP/' | tail -1 | awk '{print $2}'
     elif command -v curl >/dev/null 2>&1; then
         curl -s -o /dev/null -w '%{http_code}' "$_url"
     else
@@ -38,7 +38,7 @@ http_get_auth() {
     if command -v wget >/dev/null 2>&1; then
         wget -q --server-response -O /dev/null \
             --header="Authorization: Bearer ${_token}" \
-            "$_url" 2>&1 | grep -m1 'HTTP/' | awk '{print $2}'
+            "$_url" 2>&1 | grep 'HTTP/' | tail -1 | awk '{print $2}'
     elif command -v curl >/dev/null 2>&1; then
         curl -s -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${_token}" \
