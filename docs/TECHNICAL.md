@@ -359,17 +359,17 @@ replays the Tessera v0.1.5 fixture files from `../tessera/conformance/fixtures/`
 |------|------|----------|
 | `task.create` | `POST /api/tasks` | `sprino.task.create` |
 | `task.get` | `GET /api/tasks/:id` | `sprino.task.get` |
-| `task.list` | `GET /api/tasks` | `sprino.task.list` |
+| `task.list` | `GET /api/tasks` | — |
 | `task.update_status` | `PATCH /api/tasks/:id/status` | `sprino.task.update_status` |
 | `task.update` | `PATCH /api/tasks/:id` | `sprino.task.update` |
-| `event.list` | `GET /api/events` | `sprino.event.list` |
+| `event.list` | `GET /api/events` | — |
 | `project.list` | `GET /api/projects` | `sprino.project.list` |
 | `project.get` | `GET /api/projects/:id` | `sprino.project.get` |
 | `project.create` | `POST /api/projects` | `sprino.project.create` |
 | `actor.register` | `POST /api/actors` | `sprino.actor.register` |
 | `actor.list` | `GET /api/actors` | `sprino.actor.list` |
 | `actor.get` | `GET /api/actors/:id` | `sprino.actor.get` |
-| `actor.revoke_token` | `DELETE /api/actors/:id/token` | `sprino.actor.revoke_token` |
+| `actor.revoke_token` | `POST /api/actors/:id/revoke_token` | `sprino.actor.revoke_token` |
 | `actor.heartbeat` | `POST /api/actors/:id/heartbeat` | `sprino.actor.heartbeat` |
 | `actor.deactivate` | `POST /api/actors/:id/deactivate` | `sprino.actor.deactivate` |
 | `attachment.create_upload` | `POST /api/tasks/:id/attachments` | `sprino.attachment.create_upload` |
@@ -390,15 +390,15 @@ A second Tessera implementer is under no obligation to provide them.
 
 | Extension | HTTP | MCP tool |
 |-----------|------|----------|
-| Workflow state machine | `PATCH /api/tasks/:id/workflow` | `sprino.workflow.transition` |
+| Workflow state machine | `POST /api/tasks/:id/transition` | `sprino.task.transition_workflow` |
 | Task reorder | `POST /api/tasks/:id/reorder` | — |
 | Task hierarchy | `PATCH /api/tasks/:id/parent` | — |
 | Task dependencies | `POST /api/tasks/:id/dependencies`, `DELETE /api/tasks/:id/dependencies` | — |
-| Sprint CRUD | `POST /api/projects/:id/sprints`, `GET /api/projects/:id/sprints`, `GET /api/sprints/:id`, `PATCH /api/sprints/:id`, `POST /api/tasks/:id/sprint`, `DELETE /api/tasks/:id/sprint` | — |
-| Saved views | `POST /api/projects/:id/views` | — |
+| Sprint CRUD | `POST /api/projects/:id/sprints`, `GET /api/projects/:id/sprints`, `GET /api/sprints/:id`, `PATCH /api/sprints/:id/status`, `POST /api/sprints/:id/tasks`, `DELETE /api/sprints/:id/tasks/:taskId` | — |
+| Saved views | `POST /api/projects/:id/saved-views` | — |
 | Automation rules | `POST /api/projects/:id/automation-rules` | — |
 | Workspace management | `GET /api/workspaces`, `POST /api/workspaces` | `sprino.workspace.list`, `sprino.workspace.get`, `sprino.workspace.member.list` |
-| Audit export | `GET /api/audit/export`, `GET /api/audit/export/csv` | `sprino.audit.export` |
+| Audit export | `GET /api/audit/export`, `GET /api/audit/export/csv` | `audit.export` |
 
 ### Conformance testing
 
@@ -668,7 +668,7 @@ curl -s http://localhost:3001/api/metrics \
 ```
 
 Returns a JSON snapshot of all counters. Requires a valid Bearer token
-(workspace-scoped endpoint on the `/api` router).
+(token-authenticated; does not require a workspace header).
 
 ### Running the smoke-check script
 
