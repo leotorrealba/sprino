@@ -25,7 +25,7 @@ http_get() {
     if command -v wget >/dev/null 2>&1; then
         wget -q --server-response -O /dev/null "$_url" 2>&1 | grep 'HTTP/' | tail -1 | awk '{print $2}'
     elif command -v curl >/dev/null 2>&1; then
-        curl -s -o /dev/null -w '%{http_code}' "$_url"
+        curl -sL -o /dev/null -w '%{http_code}' "$_url"
     else
         die "Neither wget nor curl found. Cannot make HTTP requests."
     fi
@@ -40,7 +40,7 @@ http_get_auth() {
             --header="Authorization: Bearer ${_token}" \
             "$_url" 2>&1 | grep 'HTTP/' | tail -1 | awk '{print $2}'
     elif command -v curl >/dev/null 2>&1; then
-        curl -s -o /dev/null -w '%{http_code}' \
+        curl -sL -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${_token}" \
             "$_url"
     else
@@ -127,7 +127,7 @@ log "Admin token extracted (length: $(printf '%s' "$ADMIN_TOKEN" | wc -c | tr -d
 
 # ---------- authenticated API call ----------
 log "Making authenticated GET http://localhost:3001/api/projects..."
-API_CODE=$(http_get_auth "http://localhost:3001/api/projects" "$ADMIN_TOKEN" 2>/dev/null || echo "000")
+API_CODE=$(http_get_auth "http://localhost:3001/api/projects" "$ADMIN_TOKEN" 2>/dev/null || true)
 API_CODE=${API_CODE:-000}
 
 if [ "$API_CODE" != "200" ]; then
