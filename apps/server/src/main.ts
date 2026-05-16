@@ -56,7 +56,7 @@ async function buildApp(): Promise<Hono<AuthEnv>> {
   });
 
   app.get('/healthz', (c) =>
-    c.json({ ok: true, version: '0.0.9', protocol: 'tessera/v0.1.2' }),
+    c.json({ ok: true, version: '0.2.0', protocol: 'tessera/v0.1.5' }),
   );
 
   // /api/events/stream — SSE feed. Mounted DIRECTLY on the app (NOT under

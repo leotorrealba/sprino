@@ -562,6 +562,74 @@ Full rationale, edge cases, and test notes: [ADR 0001](./adr/0001-e1-e2-e3-works
 
 ---
 
+## 10g. Observability (E4)
+
+### In-memory telemetry
+
+`apps/server/src/service/telemetry.ts` maintains a process-local metrics
+store that is reset on every server restart. It tracks:
+
+- **Request counts** per `METHOD path` pair.
+- **Status buckets** — counts for `2xx`, `3xx`, `4xx`, `5xx` per route.
+- **MCP tool call counts** per tool name.
+- **Latency samples** (last-N ring buffer per route) for P50/P95 estimation.
+
+The telemetry middleware in `main.ts` feeds every request except `/healthz`
+(liveness-probe noise would drown signal in production).
+
+### Reading metrics
+
+```sh
+curl -s http://localhost:3001/api/metrics \
+  -H "Authorization: Bearer $SPRINO_ADMIN_TOKEN" | jq
+```
+
+Returns a JSON snapshot of all counters and latency buckets. Requires a
+valid Bearer token (workspace-scoped endpoint on the `/api` router).
+
+### Running the smoke-check script
+
+The smoke-check script can be run against any live Sprino server to assert
+SLO compliance:
+
+```sh
+SERVER_URL=http://localhost:3001 BEARER_TOKEN=<admin-token> \
+  bun run apps/server/scripts/smoke-check.ts
+```
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SERVER_URL` | `http://localhost:3001` | Base URL of the target server |
+| `BEARER_TOKEN` | (unset) | Admin token; if missing, authenticated checks are skipped with a warning |
+
+### SLOs asserted
+
+| Endpoint | Assertion |
+| --- | --- |
+| `GET /healthz` | HTTP 200, `ok: true`, `version` and `protocol` fields present, response < **500 ms** |
+| `GET /api/projects` | HTTP 200, response < **1000 ms** |
+
+### Docker-level smoke test
+
+For Docker Compose stacks, `scripts/smoke.sh` runs a curl-based health loop
+that waits for the server to become reachable and then makes the same
+`/healthz` assertion. It is complementary to the programmatic script above:
+`smoke.sh` is used inside `docker-compose --profile full up` to gate
+dependent services; `smoke-check.ts` is used in CI post-deploy pipelines and
+local release checklists.
+
+### Limitations
+
+Telemetry is **in-memory only** — it resets on restart and is not shared
+across instances. This is intentional for pre-alpha: the goal is quick
+diagnostics on a single-node deploy, not production-grade APM. Persistent
+metrics (Prometheus scrape endpoint, multi-instance aggregation) are deferred
+to v0.3.
+
+---
+
 ## 11. Where to go next
 
 - New to the project? Read [`docs/EXPLAINED.md`](./EXPLAINED.md).
