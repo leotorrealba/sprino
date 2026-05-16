@@ -6,6 +6,26 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
+## [v0.3.1] — 2026-05-16
+
+### Fixed
+
+- **Audit-export entitlement guard moved to service layer** — `assertAuditExportEnabled`
+  was called in both the HTTP and MCP adapters. Now called once inside
+  `exportAuditEvents()` so any future adapter gets the guard for free and the
+  invariant is enforced at the boundary that owns it.
+- **Dual-adapter parity test** — `test/adapter_parity.test.ts` asserts that HTTP
+  and MCP return the same task + event field keys and types for `task.create`,
+  `task.update_status`, and the version-mismatch OCC path. Catches future
+  shape divergence before users notice.
+- **EXPLAINED.md OCC language precision** — tightened the conflict-detection
+  description to clarify that `if_match` is optional; only status updates that
+  include it are subject to OCC rejection. The previous phrasing implied all
+  writes carry a version.
+- **Docker-smoke CI path filter** — `apps/**` and `packages/**` added to the
+  `pull_request` path filter in `.github/workflows/docker-smoke.yml` so app code
+  changes in PRs trigger the smoke check (not only pushes to main).
+
 ## [v0.3.0] — 2026-05-16
 
 ### Added
@@ -250,7 +270,8 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Tessera (the protocol) is versioned independently. Sprino's `@sprino/protocol-types` package mirrors Tessera's tag exactly.
 - The first stable tag (`v0.1.0`) will lock the wire protocol surface. Until then, treat anything in `apps/server/src/adapters/` as load-bearing-but-evolving.
 
-[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.3.1...HEAD
+[v0.3.1]: https://github.com/leotorrealba/sprino/compare/v0.3.0...v0.3.1
 [v0.3.0]: https://github.com/leotorrealba/sprino/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/leotorrealba/sprino/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/leotorrealba/sprino/compare/v0.0.9...v0.1.0
