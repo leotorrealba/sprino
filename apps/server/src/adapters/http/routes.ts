@@ -1376,6 +1376,9 @@ function errorResponse(c: any, err: unknown): Response {
   if (err instanceof TaskNotFoundError) {
     return c.json({ error: 'task_not_found', task_id: err.taskId }, 404);
   }
+  if (err instanceof ActorNotFoundError) {
+    return c.json({ error: 'actor_not_found', actor_id: err.actorId }, 404);
+  }
   if (err instanceof TaskNotInColumnError) {
     return c.json(
       { error: 'task_not_in_column', task_id: err.taskId, column_id: err.columnId },
