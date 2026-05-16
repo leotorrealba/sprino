@@ -1,0 +1,461 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Sprino — reference implementation of Tessera
+/**
+ * G2-P1: PATCH /api/tasks/:id integration tests.
+ *
+ * Covers all task.update scenarios:
+ *   - Single field updates (title, description, assignee_id)
+ *   - Multi-field updates
+ *   - context_updated event is written
+ *   - OCC: 409 on version mismatch
+ *   - Idempotency: same operation_id replays the cached response
+ *   - Validation: 400 on empty title, title > 280, description > 16384, no fields
+ *   - 404 for task in a different workspace
+ */
+
+import { and, eq } from 'drizzle-orm';
+import { v7 as uuidv7 } from 'uuid';
+import { describe, expect, it } from 'vitest';
+import { db } from '../src/db/client.ts';
+import { createTask } from '../src/service/tasks.ts';
+import {
+  FIXTURE_ACTOR_ID,
+  FIXTURE_PROJECT_ID,
+  FIXTURE_TOKEN,
+  FIXTURE_WORKSPACE_ID,
+  buildTestApp,
+  seedDbActor,
+  seedWorkspace,
+} from './setup.ts';
+import { projects, workspaceMembers } from '../src/db/schema.ts';
+import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
+
+// ── MCP helper ─────────────────────────────────────────────────────────────
+
+function mcpCall(
+  token: string,
+  name: string,
+  args: Record<string, unknown> = {},
+): Request {
+  return new Request('http://localhost/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }),
+  });
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function apiHeaders(token = FIXTURE_TOKEN, workspaceId = FIXTURE_WORKSPACE_ID) {
+  return {
+    authorization: `Bearer ${token}`,
+    'x-workspace-id': workspaceId,
+    'content-type': 'application/json',
+  };
+}
+
+async function makeTask(title = 'test task'): Promise<{ id: string; version: number }> {
+  const res = await createTask(db, {
+    req: { operation_id: uuidv7(), project_id: FIXTURE_PROJECT_ID, title },
+    actorId: FIXTURE_ACTOR_ID,
+    workspaceId: FIXTURE_WORKSPACE_ID,
+  });
+  return { id: res.task.id, version: res.task.version };
+}
+
+function patchTask(
+  app: ReturnType<typeof buildTestApp>,
+  taskId: string,
+  body: Record<string, unknown>,
+  token = FIXTURE_TOKEN,
+  workspaceId = FIXTURE_WORKSPACE_ID,
+) {
+  return app.fetch(
+    new Request(`http://test/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: apiHeaders(token, workspaceId),
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+// ── tests ──────────────────────────────────────────────────────────────────
+
+describe('PATCH /api/tasks/:id', () => {
+  it('updates title only (200, title updated, version bumped)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('original title');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      title: 'updated title',
+    });
+
+    expect(r.status).toBe(200);
+    const body = await r.json() as { task: { title: string; version: number }; event: { kind: string } };
+    expect(body.task.title).toBe('updated title');
+    expect(body.task.version).toBe(version + 1);
+    expect(body.event.kind).toBe('context_updated');
+  });
+
+  it('updates description only (200, description updated)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('desc-only task');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      description: 'new description',
+    });
+
+    expect(r.status).toBe(200);
+    const body = await r.json() as { task: { description: string } };
+    expect(body.task.description).toBe('new description');
+  });
+
+  it('updates assignee_id (200, assignee updated)', async () => {
+    const app = buildTestApp();
+    const { actorId } = await seedDbActor({ displayName: 'Assignee Actor' });
+    const { id, version } = await makeTask('assignee task');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      assignee_id: actorId,
+    });
+
+    expect(r.status).toBe(200);
+    const body = await r.json() as { task: { assignee_id: string } };
+    expect(body.task.assignee_id).toBe(actorId);
+  });
+
+  it('unassigns with assignee_id: null', async () => {
+    const app = buildTestApp();
+    const { actorId } = await seedDbActor({ displayName: 'To Unassign' });
+    const { id, version } = await makeTask('unassign task');
+
+    // First assign
+    await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      assignee_id: actorId,
+    });
+
+    // Now unassign
+    const r2 = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version + 1,
+      assignee_id: null,
+    });
+
+    expect(r2.status).toBe(200);
+    const body = await r2.json() as { task: { assignee_id: string | null } };
+    expect(body.task.assignee_id).toBeNull();
+  });
+
+  it('updates multiple fields at once', async () => {
+    const app = buildTestApp();
+    const { actorId } = await seedDbActor({ displayName: 'Multi Assignee' });
+    const { id, version } = await makeTask('multi-field task');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      title: 'new title',
+      description: 'new description',
+      assignee_id: actorId,
+    });
+
+    expect(r.status).toBe(200);
+    const body = await r.json() as {
+      task: { title: string; description: string; assignee_id: string; version: number };
+    };
+    expect(body.task.title).toBe('new title');
+    expect(body.task.description).toBe('new description');
+    expect(body.task.assignee_id).toBe(actorId);
+    expect(body.task.version).toBe(version + 1);
+  });
+
+  it('writes a context_updated event (GET /api/events shows it)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('event-check task');
+
+    await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      title: 'title that emits event',
+    });
+
+    const eventsR = await app.fetch(
+      new Request(
+        `http://test/api/events?project_id=${FIXTURE_PROJECT_ID}&task_id=${id}`,
+        { headers: apiHeaders() },
+      ),
+    );
+    expect(eventsR.status).toBe(200);
+    const evBody = await eventsR.json() as { events: { kind: string; payload: Record<string, unknown> }[] };
+    const contextUpdated = evBody.events.find((e) => e.kind === 'context_updated');
+    expect(contextUpdated).toBeDefined();
+    // Delta payload should record from/to for title
+    expect(contextUpdated?.payload['title']).toMatchObject({
+      from: 'event-check task',
+      to: 'title that emits event',
+    });
+  });
+
+  it('returns 409 on version mismatch (if_match: 999)', async () => {
+    const app = buildTestApp();
+    const { id } = await makeTask('mismatch task');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: 999,
+      title: 'should fail',
+    });
+
+    expect(r.status).toBe(409);
+    const body = await r.json() as { error: string };
+    expect(body.error).toBe('version_mismatch');
+  });
+
+  it('is idempotent on same operation_id', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('idempotency task');
+    const operationId = uuidv7();
+
+    const r1 = await patchTask(app, id, {
+      operation_id: operationId,
+      if_match: version,
+      title: 'idempotent title',
+    });
+    expect(r1.status).toBe(200);
+
+    // Second request with same operation_id should return the same response
+    const r2 = await patchTask(app, id, {
+      operation_id: operationId,
+      if_match: version,
+      title: 'idempotent title',
+    });
+    expect(r2.status).toBe(200);
+    const body1 = await r1.json() as { task: { version: number } };
+    const body2 = await r2.json() as { task: { version: number } };
+    expect(body1.task.version).toBe(body2.task.version);
+  });
+
+  it('rejects empty title (400)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('validate title empty');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      title: '',
+    });
+
+    expect(r.status).toBe(400);
+  });
+
+  it('rejects title over 280 chars (400)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('validate title len');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      title: 'x'.repeat(281),
+    });
+
+    expect(r.status).toBe(400);
+  });
+
+  it('rejects description over 16384 chars (400)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('validate desc len');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      description: 'x'.repeat(16385),
+    });
+
+    expect(r.status).toBe(400);
+  });
+
+  it('rejects request with no updatable fields (400)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('validate no fields');
+
+    const r = await patchTask(app, id, {
+      operation_id: uuidv7(),
+      if_match: version,
+      // No title, description, or assignee_id
+    });
+
+    expect(r.status).toBe(400);
+  });
+
+  it('returns 403 or 404 for task in a different workspace', async () => {
+    const app = buildTestApp();
+    // Task lives in FIXTURE_WORKSPACE_ID
+    const { id, version } = await makeTask('different ws task');
+
+    // Create a second workspace and enroll a fresh actor into it (not into FIXTURE_WORKSPACE_ID)
+    const otherWsId = await seedWorkspace({ slug: 'other-ws-for-task-update' });
+    const { actorId: otherActorId, token: otherToken } = await seedDbActor({
+      displayName: 'Other WS Actor',
+    });
+    // Remove from fixture workspace, add to otherWsId only
+    await db.delete(workspaceMembers).where(
+      and(
+        eq(workspaceMembers.workspaceId, FIXTURE_WORKSPACE_ID),
+        eq(workspaceMembers.actorId, otherActorId),
+      ),
+    );
+    await db.insert(workspaceMembers).values({
+      workspaceId: otherWsId,
+      actorId: otherActorId,
+      role: 'member',
+    });
+
+    // otherToken is authenticated for otherWsId but the task lives in FIXTURE_WORKSPACE_ID.
+    // The service-level assertProjectInWorkspace guard should reject this with 404.
+    const r = await app.fetch(
+      new Request(`http://test/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${otherToken}`,
+          'x-workspace-id': otherWsId,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          operation_id: uuidv7(),
+          if_match: version,
+          title: 'should be rejected',
+        }),
+      }),
+    );
+
+    expect([403, 404]).toContain(r.status);
+  });
+});
+
+// ── MCP tests ──────────────────────────────────────────────────────────────
+
+describe('sprino.task.update (MCP)', () => {
+  it('updates title via MCP', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp title task');
+
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: version,
+        title: 'mcp updated title',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result?: { structuredContent: { task: { title: string; version: number }; event: { kind: string } } };
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result).toBeDefined();
+    expect(body.result!.structuredContent.task.title).toBe('mcp updated title');
+    expect(body.result!.structuredContent.task.version).toBe(version + 1);
+    expect(body.result!.structuredContent.event.kind).toBe('context_updated');
+  });
+
+  it('resolves workspace automatically (single-workspace actor)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp auto-ws task');
+
+    // No workspace_id passed — should auto-resolve to FIXTURE_WORKSPACE_ID
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: version,
+        description: 'auto resolved workspace',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result?: { structuredContent: { task: { description: string } } };
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result!.structuredContent.task.description).toBe('auto resolved workspace');
+  });
+
+  it('returns version_mismatch error for stale if_match', async () => {
+    const app = buildTestApp();
+    const { id } = await makeTask('mcp version mismatch task');
+
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: 999,
+        title: 'should fail',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32009);
+    expect(body.error!.message).toBe('version_mismatch');
+  });
+
+  it('is idempotent on same operation_id', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp idempotency task');
+    const operationId = uuidv7();
+
+    const res1 = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: operationId,
+        task_id: id,
+        if_match: version,
+        title: 'mcp idempotent title',
+      }),
+    );
+    expect(res1.status).toBe(200);
+    const body1 = (await res1.json()) as {
+      result?: { structuredContent: { task: { version: number } } };
+    };
+    expect(body1.result).toBeDefined();
+
+    // Second call with same operation_id should replay the cached response
+    const res2 = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: operationId,
+        task_id: id,
+        if_match: version,
+        title: 'mcp idempotent title',
+      }),
+    );
+    expect(res2.status).toBe(200);
+    const body2 = (await res2.json()) as {
+      result?: { structuredContent: { task: { version: number } } };
+    };
+    expect(body2.result).toBeDefined();
+    expect(body1.result!.structuredContent.task.version).toBe(
+      body2.result!.structuredContent.task.version,
+    );
+  });
+});

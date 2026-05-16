@@ -335,6 +335,30 @@ export const TaskUpdateStatusResSchema = z.object({
 });
 export type TaskUpdateStatusRes = z.infer<typeof TaskUpdateStatusResSchema>;
 
+export const TaskUpdateReqSchema = z
+  .object({
+    operation_id: uuid,
+    task_id: uuid,
+    if_match: z.number().int().min(1),
+    title: z.string().min(1).max(280).optional(),
+    description: z.string().max(16384).optional(),
+    assignee_id: uuid.nullable().optional(),
+  })
+  .refine(
+    (req) =>
+      req.title !== undefined ||
+      req.description !== undefined ||
+      req.assignee_id !== undefined,
+    { message: 'at least one of title, description, or assignee_id is required' },
+  );
+export type TaskUpdateReq = z.infer<typeof TaskUpdateReqSchema>;
+
+export const TaskUpdateResSchema = z.object({
+  task: TaskSchema,
+  event: EventSchema,
+});
+export type TaskUpdateRes = z.infer<typeof TaskUpdateResSchema>;
+
 export const EventListResSchema = z.object({
   events: z.array(EventWithActorSchema),
 });

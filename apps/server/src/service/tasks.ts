@@ -33,7 +33,7 @@
 import { and, desc, eq, asc, inArray, ne, sql, ilike } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
+import { actors, events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
 import type { TaskRow, EventRow } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
@@ -56,6 +56,8 @@ import {
   type TaskStatus,
   type TaskUpdateStatusReq,
   type TaskUpdateStatusRes,
+  type TaskUpdateReq,
+  type TaskUpdateRes,
   type UpdateTaskPointsReq,
   type UpdateTaskPointsRes,
   type WorkflowColumn,
@@ -73,6 +75,7 @@ import {
 import { resolveProject } from './projects.ts';
 import { applyAutomationRules } from './automation.ts';
 import { assertProjectInWorkspace } from './authorization.ts';
+import { ActorNotFoundError } from './actors.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -642,6 +645,137 @@ export async function updateTaskStatus(
   } catch (err) {
     const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
     if (raced) return raced as TaskUpdateStatusRes;
+    throw err;
+  }
+}
+
+export async function updateTask(
+  db: Db,
+  args: { req: TaskUpdateReq; actorId: string; workspaceId: string },
+): Promise<TaskUpdateRes> {
+  const requestHash = hashRequest(args.req);
+
+  const cached = await checkIdempotency(db, args.req.operation_id, requestHash);
+  if (cached) return cached as TaskUpdateRes;
+
+  const eventId = uuidv7();
+  const now = new Date();
+
+  try {
+    return await db.transaction(async (tx) => {
+      // Lock the row to prevent concurrent updates from racing on the same version.
+      const rows = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, args.req.task_id))
+        .for('update');
+      const current = rows[0];
+
+      if (!current) throw new TaskNotFoundError(args.req.task_id);
+      await assertProjectInWorkspace(tx, { projectId: current.projectId, workspaceId: args.workspaceId });
+      if (current.version !== args.req.if_match) {
+        throw new VersionMismatchError(rowToTask(current));
+      }
+
+      // Build update set and delta payload dynamically from provided fields only.
+      type TaskUpdateSet = {
+        version: number;
+        updatedAt: Date;
+        title?: string;
+        description?: string;
+        assigneeId?: string | null;
+      };
+      const updateSet: TaskUpdateSet = {
+        version: current.version + 1,
+        updatedAt: now,
+      };
+      const deltaPayload: Record<string, { from: unknown; to: unknown }> = {};
+
+      if (args.req.title !== undefined) {
+        updateSet.title = args.req.title;
+        deltaPayload['title'] = { from: current.title, to: args.req.title };
+      }
+      if (args.req.description !== undefined) {
+        updateSet.description = args.req.description;
+        deltaPayload['description'] = { from: current.description, to: args.req.description };
+      }
+      if (args.req.assignee_id !== undefined) {
+        if (args.req.assignee_id !== null) {
+          const [assignee] = await tx
+            .select({ id: actors.id })
+            .from(actors)
+            .where(eq(actors.id, args.req.assignee_id))
+            .limit(1);
+          if (!assignee) throw new ActorNotFoundError(args.req.assignee_id);
+        }
+        updateSet.assigneeId = args.req.assignee_id;
+        deltaPayload['assignee_id'] = { from: current.assigneeId, to: args.req.assignee_id };
+      }
+
+      const [updatedRow] = await tx
+        .update(tasks)
+        .set(updateSet)
+        .where(
+          and(
+            eq(tasks.id, args.req.task_id),
+            eq(tasks.version, args.req.if_match),
+          ),
+        )
+        .returning();
+
+      if (!updatedRow) {
+        // Should be unreachable given we held the lock, but defensive.
+        throw new VersionMismatchError(rowToTask(current));
+      }
+
+      const [eventRow] = await tx
+        .insert(events)
+        .values({
+          id: eventId,
+          taskId: args.req.task_id,
+          actorId: args.actorId,
+          kind: 'context_updated',
+          payload: governancePayload(args.workspaceId, deltaPayload),
+          operationId: args.req.operation_id,
+          createdAt: now,
+        })
+        .returning();
+
+      const response: TaskUpdateRes = {
+        task: rowToTask(updatedRow),
+        event: rowToEvent(eventRow!),
+      };
+
+      await recordOperation(tx, {
+        operationId: args.req.operation_id,
+        actorId: args.actorId,
+        requestHash,
+        responseBody: response,
+      });
+
+      // Fire automation rules for each changed field that the rule engine supports.
+      // title and description are not automation trigger fields; only assignee_id and status are.
+      const changedFields: Array<{ field: 'status' | 'assignee_id'; value: string | null }> = [];
+      if (args.req.assignee_id !== undefined && args.req.assignee_id !== current.assigneeId) {
+        changedFields.push({ field: 'assignee_id', value: args.req.assignee_id ?? null });
+      }
+
+      for (const { field, value } of changedFields) {
+        await applyAutomationRules(tx, {
+          taskId: args.req.task_id,
+          projectId: updatedRow.projectId,
+          actorId: args.actorId,
+          triggerField: field,
+          newValue: value,
+          depth: 0,
+        });
+      }
+
+      return response;
+    });
+  } catch (err) {
+    const raced = await checkIdempotency(db, args.req.operation_id, requestHash);
+    if (raced) return raced as TaskUpdateRes;
     throw err;
   }
 }
