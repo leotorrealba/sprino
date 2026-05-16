@@ -18,7 +18,7 @@ cd "$REPO_ROOT"
 log() { printf '[smoke] %s\n' "$*"; }
 die() { printf '[smoke] FATAL: %s\n' "$*" >&2; exit 1; }
 
-# ---------- http helper ----------
+# ---------- http helpers ----------
 # http_get <url> — prints the HTTP status code; returns 0 always.
 http_get() {
     _url="$1"
@@ -26,6 +26,23 @@ http_get() {
         wget -q --server-response -O /dev/null "$_url" 2>&1 | grep -m1 'HTTP/' | awk '{print $2}'
     elif command -v curl >/dev/null 2>&1; then
         curl -s -o /dev/null -w '%{http_code}' "$_url"
+    else
+        die "Neither wget nor curl found. Cannot make HTTP requests."
+    fi
+}
+
+# http_get_auth <url> <token> — like http_get but sends Authorization: Bearer.
+http_get_auth() {
+    _url="$1"
+    _token="$2"
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --server-response -O /dev/null \
+            --header="Authorization: Bearer ${_token}" \
+            "$_url" 2>&1 | grep -m1 'HTTP/' | awk '{print $2}'
+    elif command -v curl >/dev/null 2>&1; then
+        curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${_token}" \
+            "$_url"
     else
         die "Neither wget nor curl found. Cannot make HTTP requests."
     fi
@@ -89,7 +106,7 @@ ACTORS_JSON=""
 # Read the single-quoted value of SPRINO_ACTORS_JSON from .env.
 # The line looks like:  SPRINO_ACTORS_JSON='[{"id":"...","token":"..."}]'
 # We strip the variable name, the surrounding single quotes, and any trailing comment.
-ACTORS_JSON=$(grep '^SPRINO_ACTORS_JSON=' .env | sed "s/^SPRINO_ACTORS_JSON='\(.*\)'$/\1/")
+ACTORS_JSON=$(grep -m1 '^SPRINO_ACTORS_JSON=' .env | sed "s/^SPRINO_ACTORS_JSON='\([^']*\)'.*$/\1/")
 if [ -z "$ACTORS_JSON" ]; then
     die "Could not extract SPRINO_ACTORS_JSON from .env."
 fi
@@ -110,17 +127,8 @@ log "Admin token extracted (length: $(printf '%s' "$ADMIN_TOKEN" | wc -c | tr -d
 
 # ---------- authenticated API call ----------
 log "Making authenticated GET http://localhost:3001/api/projects..."
-if command -v wget >/dev/null 2>&1; then
-    API_CODE=$(wget -q --server-response -O /dev/null \
-        --header="Authorization: Bearer ${ADMIN_TOKEN}" \
-        "http://localhost:3001/api/projects" 2>&1 | grep -m1 'HTTP/' | awk '{print $2}')
-elif command -v curl >/dev/null 2>&1; then
-    API_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-        -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-        "http://localhost:3001/api/projects")
-else
-    die "Neither wget nor curl found."
-fi
+API_CODE=$(http_get_auth "http://localhost:3001/api/projects" "$ADMIN_TOKEN" 2>/dev/null || echo "000")
+API_CODE=${API_CODE:-000}
 
 if [ "$API_CODE" != "200" ]; then
     die "GET /api/projects returned HTTP $API_CODE (expected 200)."
