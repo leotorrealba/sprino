@@ -6,6 +6,97 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
+## [v0.3.0] — 2026-05-16
+
+### Added
+
+- **Observability instrumentation (E4-P1)** — `service/telemetry.ts` module with
+  in-memory request counters (`requests_total`, `requests_by_status`,
+  `errors_total`) and MCP tool counters (`mcp_calls_total`, `mcp_errors_total`).
+  Per-request structured JSON log to stdout. `GET /api/metrics` endpoint (Bearer
+  required). `/healthz` updated to report `version: 0.3.0`.
+- **SLO smoke-check script (E4-P2)** — `apps/server/scripts/smoke-check.ts`
+  programmatic SLO checker: asserts `/healthz` responds in <500 ms and
+  `/api/projects` in <1000 ms. Run with
+  `SERVER_URL=... BEARER_TOKEN=... bun run apps/server/scripts/smoke-check.ts`.
+  Healthz endpoint updated to `version: 0.3.0`, `protocol: tessera/v0.1.5`.
+- **Release gate checklist (E4-P3)** — `scripts/release-checklist.sh` POSIX
+  script with seven gates: git clean, on-main check, CHANGELOG entry, README
+  version reference, typecheck, tests, and optional `gh` CLI reachability.
+  Exits 0 only if all gates pass. Run with
+  `VERSION=vX.Y.Z sh scripts/release-checklist.sh`.
+- **Tessera integration profile (E5-P1)** — `docs/TECHNICAL.md` §9b: complete
+  table of all 20 Tessera v0.1.5 HTTP+MCP surfaces and all Sprino extensions not
+  in the spec (workflow, sprints, hierarchy, deps, saved views, automation,
+  workspace management, audit export). Conformance testing commands included.
+  `docs/EXPLAINED.md` updated to reflect the v0.2.0 feature set.
+- **Onboarding hardening (E5-P2)** — `README.md` smoke-check step after stack
+  start, corrected token-rotation known-limitation note. `docs/RESTORE.md`
+  post-restore smoke-check step added.
+
+## [v0.2.0] — 2026-05-16
+
+### Added
+
+- **`task.update` (Tessera v0.1.5 gap G2)** — `PATCH /api/tasks/:id` and
+  `sprino.task.update` MCP tool for patching title, description, and
+  assignee. Implements OCC via `if_match` version guard, writes a
+  `context_updated` event with `{from, to}` delta payload, and supports
+  full idempotency replay on `operation_id`.
+- **MCP workspace tools (G1)** — `sprino.workspace.list`,
+  `sprino.workspace.get`, and `sprino.workspace.member.list` MCP tools with
+  automatic single-workspace resolution for actors in exactly one workspace.
+  MCP auth now distinguishes `no_workspace_membership` (actor has no
+  workspaces) from `workspace_id_required` (actor has multiple).
+- **Docker smoke test (G3)** — `scripts/smoke.sh` exercises
+  `bootstrap.sh --force` → `docker compose --profile full up -d --build` →
+  health polling → authenticated API call → teardown. `KEEP_UP=1` escape
+  hatch for debugging. GitHub Actions workflow
+  `.github/workflows/docker-smoke.yml` runs on pushes to `main` and on PRs
+  that touch Docker-related files (path-filtered; not every push triggers).
+- **Workflow state machine (D1)** — `workflow_columns` table with configurable
+  per-project columns; `sprino.workflow.transition` MCP tool; guard rules
+  enforced in the service layer.
+- **Backlog and board ordering (D2)** — fractional-rank ordering for backlog
+  list and Kanban board; task reorder via `POST /api/tasks/:id/reorder` with
+  `before_task_id` / `after_task_id` anchors.
+- **Hierarchy and dependency management (D3)** — parent/child task nesting,
+  `blocks`/`blocked_by` dependency edges, and cycle-detection guard.
+- **Sprint and iteration planning (D4)** — `sprints` table; project-scoped
+  sprint create/list (`POST|GET /api/projects/:id/sprints`), sprint get/patch
+  status (`GET|PATCH /api/sprints/:id`), and task-to-sprint assignment.
+- **Search, saved views, and automation rules (D5)** — task filtering by
+  `title_contains` (ILIKE on title), saved view persistence, and per-project
+  automation rule engine that fires on task `status` and `assignee_id`
+  changes.
+- **Multi-workspace tenancy (E1)** — `workspaces` and `workspace_members`
+  tables; project- and task-scoped service calls assert workspace ownership
+  before mutating; auth middleware resolves and injects workspace context.
+- **Audit governance and export (E2)** — audit trail built on the existing
+  `events` table; `GET /api/audit/export` endpoint with date/actor/resource
+  filters.
+- **Workspace plans and guardrails (E3)** — `workspace_plans` table with
+  per-workspace max-projects, max-members, and audit-export enablement;
+  middleware-level enforcement for seat count and project creation.
+
+### Changed
+
+- Task mutation endpoints (`status`, `update`) validate the task's project
+  belongs to the requesting workspace before executing.
+- `assignee_id` updates trigger automation rules only when the value
+  actually changes (not just when the field is present in the request).
+- `sprino.task.update` MCP tool enforces at-least-one-field via JSON Schema
+  `anyOf`, mirroring the HTTP Zod `.refine()` constraint.
+
+### Fixed
+
+- `ActorNotFoundError` now returns HTTP 404 on `PATCH /api/tasks/:id` when
+  an unknown `assignee_id` is provided (was 500 before).
+- Workspace isolation test now exercises the service-layer
+  `assertProjectInWorkspace` guard rather than the auth middleware layer.
+
+## [v0.1.0] — 2026-05-06
+
 ### Added
 - Internal actor roles (`admin` / `member`) are now persisted on `actors`,
   hydrated through auth middleware, and enforced for actor-admin verbs in
@@ -159,16 +250,11 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Tessera (the protocol) is versioned independently. Sprino's `@sprino/protocol-types` package mirrors Tessera's tag exactly.
 - The first stable tag (`v0.1.0`) will lock the wire protocol surface. Until then, treat anything in `apps/server/src/adapters/` as load-bearing-but-evolving.
 
-## Honest known limitations as of v0.0.7
-
-- **Single-tenant only.** No row-level project isolation across multiple orgs; one Sprino deploy = one team.
-- **No real-time at scale.** SSE replays from the events table; no LISTEN/NOTIFY yet. Fine for ≤100 active subscribers; not benchmarked higher.
-- **Token rotation requires a server restart** (env-var-driven actor registry). Hot reload is on the v0.2 list.
-- **Web UI is intentionally thin.** No drag-and-drop, no inline editing, no comments. The protocol layer is where correctness lives; the UI is a viewer for now.
-- **No hosted SaaS.** Self-host only. Cloud is on the roadmap, not on the calendar.
-- **macOS / Linux only.** `bootstrap.sh` is bash; Windows users need WSL.
-
-[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/leotorrealba/sprino/compare/v0.2.0...v0.3.0
+[v0.2.0]: https://github.com/leotorrealba/sprino/compare/v0.1.0...v0.2.0
+[v0.1.0]: https://github.com/leotorrealba/sprino/compare/v0.0.9...v0.1.0
+[v0.0.9]: https://github.com/leotorrealba/sprino/compare/v0.0.7...v0.0.9
 [v0.0.7]: https://github.com/leotorrealba/sprino/compare/v0.0.6...v0.0.7
 [v0.0.6]: https://github.com/leotorrealba/sprino/compare/v0.0.5...v0.0.6
 [v0.0.5]: https://github.com/leotorrealba/sprino/compare/v0.0.0...v0.0.5

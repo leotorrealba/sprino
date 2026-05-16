@@ -284,6 +284,62 @@ Also do at flip time:
   reviewed by a specific person.
 - Audit any open PRs that pre-date the flip and ensure they get a real review.
 
+## Release Gating
+
+Before tagging a release, run the release gate checklist to verify the repo is
+in a clean, releasable state:
+
+```bash
+VERSION=vX.Y.Z sh scripts/release-checklist.sh
+```
+
+The script runs seven gate checks in order and exits 0 only when all pass:
+
+1. **Git clean** — working tree has no uncommitted changes.
+2. **On main** — you must be on the `main` branch.
+3. **CHANGELOG entry** — `CHANGELOG.md` contains a `## [vX.Y.Z]` heading for
+   the target version.
+4. **README version** — `README.md` references the target version string.
+5. **Typecheck** — `bun run typecheck` succeeds.
+6. **Tests** — `bun run test` succeeds against the configured test database.
+7. **GitHub CLI reachability (optional)** — if `gh` is installed and `CI_CHECK=1` is
+   set, runs `gh pr status` to verify the CLI can reach the GitHub API. Skipped otherwise.
+
+**Convention:** do not run `git tag` until the gate exits 0. The tag is the
+public signal that the release is good; make it mean something.
+
+### Test database requirement
+
+Gates 5–6 run the real test suite, so `TEST_DATABASE_URL` must point to a
+running Postgres instance:
+
+```bash
+TEST_DATABASE_URL=postgres://you@localhost:5432/sprino_test \
+  VERSION=vX.Y.Z sh scripts/release-checklist.sh
+```
+
+If the variable is not set the script falls back to
+`postgres://$(whoami)@localhost:5432/sprino_test`.
+
+### Post-tag validation
+
+After tagging, run the Docker end-to-end smoke test to confirm the published
+image boots and the health endpoint responds:
+
+```bash
+sh scripts/smoke.sh
+```
+
+`smoke.sh` spins up the full `docker-compose` stack, waits for the server to
+become healthy, hits `/healthz`, and tears down. A passing smoke run is the
+final signal that the release is shippable.
+
+### Phase E milestone
+
+Phase E (E1–E5) is complete as of v0.3.0. The next planned milestone is public
+announcement readiness — no code gates remain; the project is in
+maintain-and-ship mode.
+
 ## Emergency Override
 
 Direct pushes are blocked. If admin bypass is ever used:
