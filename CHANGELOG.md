@@ -250,15 +250,6 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - Tessera (the protocol) is versioned independently. Sprino's `@sprino/protocol-types` package mirrors Tessera's tag exactly.
 - The first stable tag (`v0.1.0`) will lock the wire protocol surface. Until then, treat anything in `apps/server/src/adapters/` as load-bearing-but-evolving.
 
-## Honest known limitations as of v0.0.7
-
-- **Single-tenant only.** No row-level project isolation across multiple orgs; one Sprino deploy = one team.
-- **No real-time at scale.** SSE replays from the events table; no LISTEN/NOTIFY yet. Fine for ≤100 active subscribers; not benchmarked higher.
-- **Token rotation requires a server restart** (env-var-driven actor registry). Hot reload is on the v0.2 list.
-- **Web UI is intentionally thin.** No drag-and-drop, no inline editing, no comments. The protocol layer is where correctness lives; the UI is a viewer for now.
-- **No hosted SaaS.** Self-host only. Cloud is on the roadmap, not on the calendar.
-- **macOS / Linux only.** `bootstrap.sh` is bash; Windows users need WSL.
-
 [Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.3.0...HEAD
 [v0.3.0]: https://github.com/leotorrealba/sprino/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/leotorrealba/sprino/compare/v0.1.0...v0.2.0

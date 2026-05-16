@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. Latest release: [**v0.2.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.2.0) — multi-workspace tenancy (E1–E3), workflow/board/sprint/search features (D1–D5), `task.update` verb (G2), MCP workspace tools (G1), and Docker smoke CI (G3).
+**Status:** pre-alpha. Active development. Latest release: [**v0.3.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.3.0) — multi-workspace tenancy (E1–E3), workflow/board/sprint/search features (D1–D5), `task.update` verb (G2), MCP workspace tools (G1), and Docker smoke CI (G3).
 
 ## Why
 
@@ -109,7 +109,7 @@ This is pre-alpha active development. If you're curious about the project, watch
 
 - **Token rotation (db-source actors):** rotate in-app via the Members tab — no restart required.
 - **Token rotation (env-source actors):** update `SPRINO_ACTORS_JSON` in `.env` and run `docker compose up -d --force-recreate server`. The new token is active immediately; the old one is revoked.
-- SSE realtime is implemented; LISTEN/NOTIFY is deferred to v0.3.
+- SSE realtime is implemented; LISTEN/NOTIFY (push-based streaming) is deferred to a future release.
 
 ## License
 
