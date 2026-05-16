@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
       - name: Run full-stack smoke test
         run: sh scripts/smoke.sh
         env:
