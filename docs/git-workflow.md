@@ -302,9 +302,8 @@ The script runs seven gate checks in order and exits 0 only when all pass:
 4. **README version** — `README.md` references the target version string.
 5. **Typecheck** — `bun run typecheck` succeeds.
 6. **Tests** — `bun run test` succeeds against the configured test database.
-7. **Open PRs (optional)** — if `gh` is installed and `CI_CHECK=1` is set,
-   runs `gh pr status` to confirm no open PRs are blocking `main`. Skipped
-   otherwise.
+7. **GitHub CLI reachability (optional)** — if `gh` is installed and `CI_CHECK=1` is
+   set, runs `gh pr status` to verify the CLI can reach the GitHub API. Skipped otherwise.
 
 **Convention:** do not run `git tag` until the gate exits 0. The tag is the
 public signal that the release is good; make it mean something.

@@ -4,6 +4,9 @@
 
 set -eu
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # ── VERSION guard ──────────────────────────────────────────────────────────────
 if [ -z "${VERSION:-}" ]; then
   printf 'ERROR: VERSION env var is not set.\n' >&2
@@ -66,7 +69,7 @@ fi
 # ── Gate 7: CI / open PRs (optional) ─────────────────────────────────────────
 if command -v gh >/dev/null 2>&1 && [ "${CI_CHECK:-}" = "1" ]; then
   if gh pr status >/dev/null 2>&1; then
-    printf '✓ gh pr status OK (no blocking open PRs)\n'
+    printf '✓ gh CLI can reach GitHub (gh pr status OK)\n'
   else
     printf '✗ gh pr status check failed\n'
     FAILED=1
