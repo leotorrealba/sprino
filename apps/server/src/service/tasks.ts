@@ -33,7 +33,7 @@
 import { and, desc, eq, asc, inArray, ne, sql, ilike } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { Db } from '../db/client.ts';
-import { events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
+import { actors, events, taskDependencies, tasks, workflowColumns, workflowTransitions, sprintTasks } from '../db/schema.ts';
 import type { TaskRow, EventRow } from '../db/schema.ts';
 import {
   DEFAULT_LIMIT,
@@ -75,6 +75,7 @@ import {
 import { resolveProject } from './projects.ts';
 import { applyAutomationRules } from './automation.ts';
 import { assertProjectInWorkspace } from './authorization.ts';
+import { ActorNotFoundError } from './actors.ts';
 
 type SelectClient = Pick<Db, 'select'>;
 
@@ -699,6 +700,14 @@ export async function updateTask(
         deltaPayload['description'] = { from: current.description, to: args.req.description };
       }
       if (args.req.assignee_id !== undefined) {
+        if (args.req.assignee_id !== null) {
+          const [assignee] = await tx
+            .select({ id: actors.id })
+            .from(actors)
+            .where(eq(actors.id, args.req.assignee_id))
+            .limit(1);
+          if (!assignee) throw new ActorNotFoundError(args.req.assignee_id);
+        }
         updateSet.assigneeId = args.req.assignee_id;
         deltaPayload['assignee_id'] = { from: current.assigneeId, to: args.req.assignee_id };
       }
@@ -747,7 +756,7 @@ export async function updateTask(
       // Fire automation rules for each changed field that the rule engine supports.
       // title and description are not automation trigger fields; only assignee_id and status are.
       const changedFields: Array<{ field: 'status' | 'assignee_id'; value: string | null }> = [];
-      if (args.req.assignee_id !== undefined) {
+      if (args.req.assignee_id !== undefined && args.req.assignee_id !== current.assigneeId) {
         changedFields.push({ field: 'assignee_id', value: args.req.assignee_id ?? null });
       }
 

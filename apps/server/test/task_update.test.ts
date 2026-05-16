@@ -9,10 +9,11 @@
  *   - context_updated event is written
  *   - OCC: 409 on version mismatch
  *   - Idempotency: same operation_id replays the cached response
- *   - Validation: 422 on empty title, title > 280, description > 16384, no fields
+ *   - Validation: 400 on empty title, title > 280, description > 16384, no fields
  *   - 404 for task in a different workspace
  */
 
+import { and, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.ts';
@@ -26,7 +27,7 @@ import {
   seedDbActor,
   seedWorkspace,
 } from './setup.ts';
-import { projects } from '../src/db/schema.ts';
+import { projects, workspaceMembers } from '../src/db/schema.ts';
 import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
 
 // ── MCP helper ─────────────────────────────────────────────────────────────
@@ -302,48 +303,48 @@ describe('PATCH /api/tasks/:id', () => {
     expect(r.status).toBe(400);
   });
 
-  it('returns 404 for task in a different workspace', async () => {
+  it('returns 403 or 404 for task in a different workspace', async () => {
     const app = buildTestApp();
+    // Task lives in FIXTURE_WORKSPACE_ID
     const { id, version } = await makeTask('different ws task');
 
-    // Create a separate workspace and a project in it, then use that workspace context
+    // Create a second workspace and enroll a fresh actor into it (not into FIXTURE_WORKSPACE_ID)
     const otherWsId = await seedWorkspace({ slug: 'other-ws-for-task-update' });
-    const otherProjectId = uuidv7();
-    await db.insert(projects).values({
-      id: otherProjectId,
-      slug: 'other-proj',
-      displayName: 'Other Project',
-      repoPath: null,
-      workspaceId: otherWsId,
+    const { actorId: otherActorId, token: otherToken } = await seedDbActor({
+      displayName: 'Other WS Actor',
     });
-    await seedDefaultWorkflowColumns(db, otherProjectId);
+    // Remove from fixture workspace, add to otherWsId only
+    await db.delete(workspaceMembers).where(
+      and(
+        eq(workspaceMembers.workspaceId, FIXTURE_WORKSPACE_ID),
+        eq(workspaceMembers.actorId, otherActorId),
+      ),
+    );
+    await db.insert(workspaceMembers).values({
+      workspaceId: otherWsId,
+      actorId: otherActorId,
+      role: 'member',
+    });
 
-    // Seed an actor in otherWsId so we can authenticate in that workspace
-    const { token: otherToken } = await seedDbActor({ displayName: 'Other WS Actor' });
-    // The actor is in FIXTURE_WORKSPACE_ID by default. We need them in otherWsId too.
-    // Instead, just use the fixture token but with a different x-workspace-id header
-    // that the FIXTURE_ACTOR_ID is not a member of — the workspace auth should deny.
+    // otherToken is authenticated for otherWsId but the task lives in FIXTURE_WORKSPACE_ID.
+    // The service-level assertProjectInWorkspace guard should reject this with 404.
     const r = await app.fetch(
       new Request(`http://test/api/tasks/${id}`, {
         method: 'PATCH',
         headers: {
-          authorization: `Bearer ${FIXTURE_TOKEN}`,
+          authorization: `Bearer ${otherToken}`,
           'x-workspace-id': otherWsId,
           'content-type': 'application/json',
         },
         body: JSON.stringify({
           operation_id: uuidv7(),
           if_match: version,
-          title: 'should be 404',
+          title: 'should be rejected',
         }),
       }),
     );
 
-    // The task belongs to FIXTURE_WORKSPACE_ID, but we pass otherWsId →
-    // workspace isolation check should reject (403 or 404 depending on implementation)
     expect([403, 404]).toContain(r.status);
-
-    void otherToken; // consumed to avoid unused warning
   });
 });
 
