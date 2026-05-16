@@ -225,10 +225,10 @@ describe('PATCH /api/tasks/:id', () => {
     expect(r2.status).toBe(200);
     const body1 = await r1.json() as { task: { version: number } };
     const body2 = await r2.json() as { task: { version: number } };
-    expect(body2.task.version).toBe(body1.task.version);
+    expect(body1.task.version).toBe(body2.task.version);
   });
 
-  it('rejects empty title (422)', async () => {
+  it('rejects empty title (400)', async () => {
     const app = buildTestApp();
     const { id, version } = await makeTask('validate title empty');
 
@@ -241,7 +241,7 @@ describe('PATCH /api/tasks/:id', () => {
     expect(r.status).toBe(400);
   });
 
-  it('rejects title over 280 chars (422)', async () => {
+  it('rejects title over 280 chars (400)', async () => {
     const app = buildTestApp();
     const { id, version } = await makeTask('validate title len');
 
@@ -254,7 +254,7 @@ describe('PATCH /api/tasks/:id', () => {
     expect(r.status).toBe(400);
   });
 
-  it('rejects description over 16384 chars (422)', async () => {
+  it('rejects description over 16384 chars (400)', async () => {
     const app = buildTestApp();
     const { id, version } = await makeTask('validate desc len');
 
@@ -267,7 +267,7 @@ describe('PATCH /api/tasks/:id', () => {
     expect(r.status).toBe(400);
   });
 
-  it('rejects request with no updatable fields (422)', async () => {
+  it('rejects request with no updatable fields (400)', async () => {
     const app = buildTestApp();
     const { id, version } = await makeTask('validate no fields');
 

@@ -744,14 +744,23 @@ export async function updateTask(
         responseBody: response,
       });
 
-      await applyAutomationRules(tx, {
-        taskId: args.req.task_id,
-        projectId: updatedRow.projectId,
-        actorId: args.actorId,
-        triggerField: 'title',
-        newValue: updatedRow.title,
-        depth: 0,
-      });
+      // Fire automation rules for each changed field that the rule engine supports.
+      // title and description are not automation trigger fields; only assignee_id and status are.
+      const changedFields: Array<{ field: 'status' | 'assignee_id'; value: string | null }> = [];
+      if (args.req.assignee_id !== undefined) {
+        changedFields.push({ field: 'assignee_id', value: args.req.assignee_id ?? null });
+      }
+
+      for (const { field, value } of changedFields) {
+        await applyAutomationRules(tx, {
+          taskId: args.req.task_id,
+          projectId: updatedRow.projectId,
+          actorId: args.actorId,
+          triggerField: field,
+          newValue: value,
+          depth: 0,
+        });
+      }
 
       return response;
     });
