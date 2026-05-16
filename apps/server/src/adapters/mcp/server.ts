@@ -38,6 +38,7 @@ import {
   RemoveDependencyReqSchema,
   SetParentReqSchema,
   TaskReorderReqSchema,
+  TaskUpdateReqSchema,
   TaskUpdateStatusReqSchema,
   TaskTransitionWorkflowReqSchema,
   AssignToSprintReqSchema,
@@ -97,6 +98,7 @@ import {
   reorderTask,
   setParent,
   transitionTaskWorkflow,
+  updateTask,
   updateTaskStatus,
   updateTaskPoints,
 } from '../../service/tasks.ts';
@@ -362,6 +364,25 @@ const TOOL_DEFINITIONS = [
         status: { enum: ['todo', 'doing', 'done', 'blocked'] },
         if_match: { type: 'integer', minimum: 1 },
       },
+    },
+  },
+  {
+    name: 'sprino.task.update',
+    description:
+      "Update a task's title, description, or assignee. Requires if_match (task.version for OCC). Pass workspace_id if in multiple workspaces.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...WORKSPACE_ID_PROP,
+        operation_id: { type: 'string', format: 'uuid', description: 'Idempotency key' },
+        task_id: { type: 'string', format: 'uuid' },
+        if_match: { type: 'integer', minimum: 1, description: 'Current task version (optimistic lock)' },
+        title: { type: 'string', minLength: 1, maxLength: 280, description: 'New title (optional)' },
+        description: { type: 'string', maxLength: 16384, description: 'New description (optional)' },
+        assignee_id: { type: ['string', 'null'], description: 'New assignee actor ID, or null to unassign (optional)' },
+      },
+      required: ['operation_id', 'task_id', 'if_match'],
+      additionalProperties: false,
     },
   },
   {
@@ -1041,6 +1062,11 @@ async function callTool(
     case 'sprino.task.update_status': {
       const req = TaskUpdateStatusReqSchema.parse(args);
       const res = await updateTaskStatus(db, { req, actorId: actor.id, workspaceId });
+      return wrapToolResult(res);
+    }
+    case 'sprino.task.update': {
+      const req = TaskUpdateReqSchema.parse(args);
+      const res = await updateTask(db, { req, actorId: actor.id, workspaceId });
       return wrapToolResult(res);
     }
     case 'sprino.task.transition_workflow': {

@@ -29,6 +29,28 @@ import {
 import { projects } from '../src/db/schema.ts';
 import { seedDefaultWorkflowColumns } from '../src/service/projects.ts';
 
+// ── MCP helper ─────────────────────────────────────────────────────────────
+
+function mcpCall(
+  token: string,
+  name: string,
+  args: Record<string, unknown> = {},
+): Request {
+  return new Request('http://localhost/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }),
+  });
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function apiHeaders(token = FIXTURE_TOKEN, workspaceId = FIXTURE_WORKSPACE_ID) {
@@ -322,5 +344,117 @@ describe('PATCH /api/tasks/:id', () => {
     expect([403, 404]).toContain(r.status);
 
     void otherToken; // consumed to avoid unused warning
+  });
+});
+
+// ── MCP tests ──────────────────────────────────────────────────────────────
+
+describe('sprino.task.update (MCP)', () => {
+  it('updates title via MCP', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp title task');
+
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: version,
+        title: 'mcp updated title',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result?: { structuredContent: { task: { title: string; version: number }; event: { kind: string } } };
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result).toBeDefined();
+    expect(body.result!.structuredContent.task.title).toBe('mcp updated title');
+    expect(body.result!.structuredContent.task.version).toBe(version + 1);
+    expect(body.result!.structuredContent.event.kind).toBe('context_updated');
+  });
+
+  it('resolves workspace automatically (single-workspace actor)', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp auto-ws task');
+
+    // No workspace_id passed — should auto-resolve to FIXTURE_WORKSPACE_ID
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: version,
+        description: 'auto resolved workspace',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result?: { structuredContent: { task: { description: string } } };
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result!.structuredContent.task.description).toBe('auto resolved workspace');
+  });
+
+  it('returns version_mismatch error for stale if_match', async () => {
+    const app = buildTestApp();
+    const { id } = await makeTask('mcp version mismatch task');
+
+    const res = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: uuidv7(),
+        task_id: id,
+        if_match: 999,
+        title: 'should fail',
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      error?: { code: number; message: string };
+    };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32009);
+    expect(body.error!.message).toBe('version_mismatch');
+  });
+
+  it('is idempotent on same operation_id', async () => {
+    const app = buildTestApp();
+    const { id, version } = await makeTask('mcp idempotency task');
+    const operationId = uuidv7();
+
+    const res1 = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: operationId,
+        task_id: id,
+        if_match: version,
+        title: 'mcp idempotent title',
+      }),
+    );
+    expect(res1.status).toBe(200);
+    const body1 = (await res1.json()) as {
+      result?: { structuredContent: { task: { version: number } } };
+    };
+    expect(body1.result).toBeDefined();
+
+    // Second call with same operation_id should replay the cached response
+    const res2 = await app.fetch(
+      mcpCall(FIXTURE_TOKEN, 'sprino.task.update', {
+        operation_id: operationId,
+        task_id: id,
+        if_match: version,
+        title: 'mcp idempotent title',
+      }),
+    );
+    expect(res2.status).toBe(200);
+    const body2 = (await res2.json()) as {
+      result?: { structuredContent: { task: { version: number } } };
+    };
+    expect(body2.result).toBeDefined();
+    expect(body1.result!.structuredContent.task.version).toBe(
+      body2.result!.structuredContent.task.version,
+    );
   });
 });
