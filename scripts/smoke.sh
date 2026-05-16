@@ -115,9 +115,9 @@ ADMIN_TOKEN=""
 if command -v python3 >/dev/null 2>&1; then
     ADMIN_TOKEN=$(printf '%s' "$ACTORS_JSON" | python3 -c 'import json,sys; actors=json.load(sys.stdin); print(actors[0]["token"])')
 else
-    # Pure-shell fallback: extract the first "token":"<value>" from the JSON.
-    # Works for the format bootstrap.sh produces (no spaces around colon).
-    ADMIN_TOKEN=$(printf '%s' "$ACTORS_JSON" | grep -o '"token":"[^"]*"' | head -1 | sed 's/"token":"\([^"]*\)"/\1/')
+    # Pure-shell fallback: handles both compact ("token":"val") and spaced
+    # ("token": "val") JSON, covering bootstrap.sh's shell and python3 paths.
+    ADMIN_TOKEN=$(printf '%s' "$ACTORS_JSON" | grep -o '"token" *: *"[^"]*"' | head -1 | sed 's/"token" *: *"\([^"]*\)"/\1/')
 fi
 
 if [ -z "$ADMIN_TOKEN" ]; then
