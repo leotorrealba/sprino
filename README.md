@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. Latest release: [**v0.1.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.1.0) — full Tessera v0.1.5 conformance: actor lifecycle (register/list/get/revoke/heartbeat/deactivate), attachment upload lifecycle, project creation, frontend attachment UI. First release with a complete Tessera verb surface.
+**Status:** pre-alpha. Active development. Latest release: [**v0.2.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.2.0) — multi-workspace tenancy (E1–E3), workflow/board/sprint/search features (D1–D5), `task.update` verb (G2), MCP workspace tools (G1), and Docker smoke CI (G3).
 
 ## Why
 
@@ -42,6 +42,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.7** (phase 7) — 30-minute self-host bundle: server + web Dockerfiles, `bootstrap.sh`, `docs/TOKEN-ROTATION.md`, README walkthrough
 - **v0.0.9** (phase 9) — Tessera v0.1.2 actor lifecycle: `actor.register` / `list` / `get` / `revoke_token` verbs, in-app Members tab with rotate/revoke, two-source actor model (env + db) with break-glass recovery, single-SQL auth path, race-safe rotate
 - **v0.1.0** ✅ shipped — Tessera v0.1.5 full surface: agent registration and session lifecycle (`actor.heartbeat`, `actor.deactivate`), attachment upload lifecycle (create_upload → PUT → finalize), project creation (`project.create`, slug uniqueness), frontend attachment UI, keyboard-accessible task cards. All 16 Tessera verbs implemented; 233+ conformance tests pass.
+- **v0.2.0** ✅ shipped — Multi-workspace tenancy (E1–E3): workspace isolation, audit log + export, entitlements. Workflow/board/sprint/search (D1–D5): state machine, Kanban ordering, hierarchy + deps, sprint planning, saved views + automation. Gap-series: `task.update` verb (G2), MCP workspace tools (G1), Docker smoke CI validating self-host end-to-end (G3).
 
 ## Self-host (30 minutes, end-to-end)
 
@@ -96,7 +97,7 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
   branch protection, conversation-resolution gating, the
   `enforce_admins` escape hatch.
 
-Until v0.1, this is private active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening this quarter.
+This is pre-alpha active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening.
 
 ## License
 

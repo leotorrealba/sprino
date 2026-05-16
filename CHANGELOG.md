@@ -6,6 +6,69 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 
 ## [Unreleased]
 
+## [v0.2.0] — 2026-05-16
+
+### Added
+
+- **`task.update` (Tessera v0.1.5 gap G2)** — `PATCH /api/tasks/:id` and
+  `sprino.task.update` MCP tool for patching title, description, and
+  assignee. Implements OCC via `if_match` version guard, writes a
+  `context_updated` event with `{from, to}` delta payload, and supports
+  full idempotency replay on `operation_id`.
+- **MCP workspace tools (G1)** — `sprino.workspace.list`,
+  `sprino.workspace.get`, and `sprino.workspace.member.list` MCP tools with
+  automatic single-workspace resolution for actors in exactly one workspace.
+  MCP auth now distinguishes `no_workspace_membership` (actor has no
+  workspaces) from `workspace_id_required` (actor has multiple).
+- **Docker smoke test (G3)** — `scripts/smoke.sh` exercises
+  `bootstrap.sh --force` → `docker compose --profile full up -d --build` →
+  health polling → authenticated API call → teardown. `KEEP_UP=1` escape
+  hatch for debugging. GitHub Actions workflow
+  `.github/workflows/docker-smoke.yml` runs on pushes to `main` and on PRs
+  that touch Docker-related files (path-filtered; not every push triggers).
+- **Workflow state machine (D1)** — `workflow_columns` table with configurable
+  per-project columns; `sprino.workflow.transition` MCP tool; guard rules
+  enforced in the service layer.
+- **Backlog and board ordering (D2)** — fractional-rank ordering for backlog
+  list and Kanban board; task reorder via `POST /api/tasks/:id/reorder` with
+  `before_task_id` / `after_task_id` anchors.
+- **Hierarchy and dependency management (D3)** — parent/child task nesting,
+  `blocks`/`blocked_by` dependency edges, and cycle-detection guard.
+- **Sprint and iteration planning (D4)** — `sprints` table; project-scoped
+  sprint create/list (`POST|GET /api/projects/:id/sprints`), sprint get/patch
+  status (`GET|PATCH /api/sprints/:id`), and task-to-sprint assignment.
+- **Search, saved views, and automation rules (D5)** — task filtering by
+  `title_contains` (ILIKE on title), saved view persistence, and per-project
+  automation rule engine that fires on task `status` and `assignee_id`
+  changes.
+- **Multi-workspace tenancy (E1)** — `workspaces` and `workspace_members`
+  tables; project- and task-scoped service calls assert workspace ownership
+  before mutating; auth middleware resolves and injects workspace context.
+- **Audit governance and export (E2)** — audit trail built on the existing
+  `events` table; `GET /api/audit/export` endpoint with date/actor/resource
+  filters.
+- **Workspace plans and guardrails (E3)** — `workspace_plans` table with
+  per-workspace max-projects, max-members, and audit-export enablement;
+  middleware-level enforcement for seat count and project creation.
+
+### Changed
+
+- Task mutation endpoints (`status`, `update`) validate the task's project
+  belongs to the requesting workspace before executing.
+- `assignee_id` updates trigger automation rules only when the value
+  actually changes (not just when the field is present in the request).
+- `sprino.task.update` MCP tool enforces at-least-one-field via JSON Schema
+  `anyOf`, mirroring the HTTP Zod `.refine()` constraint.
+
+### Fixed
+
+- `ActorNotFoundError` now returns HTTP 404 on `PATCH /api/tasks/:id` when
+  an unknown `assignee_id` is provided (was 500 before).
+- Workspace isolation test now exercises the service-layer
+  `assertProjectInWorkspace` guard rather than the auth middleware layer.
+
+## [v0.1.0] — 2026-05-06
+
 ### Added
 - Internal actor roles (`admin` / `member`) are now persisted on `actors`,
   hydrated through auth middleware, and enforced for actor-admin verbs in
@@ -168,7 +231,10 @@ Sprino implements [Tessera](https://github.com/leotorrealba/tessera). The wire p
 - **No hosted SaaS.** Self-host only. Cloud is on the roadmap, not on the calendar.
 - **macOS / Linux only.** `bootstrap.sh` is bash; Windows users need WSL.
 
-[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/leotorrealba/sprino/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/leotorrealba/sprino/compare/v0.1.0...v0.2.0
+[v0.1.0]: https://github.com/leotorrealba/sprino/compare/v0.0.9...v0.1.0
+[v0.0.9]: https://github.com/leotorrealba/sprino/compare/v0.0.7...v0.0.9
 [v0.0.7]: https://github.com/leotorrealba/sprino/compare/v0.0.6...v0.0.7
 [v0.0.6]: https://github.com/leotorrealba/sprino/compare/v0.0.5...v0.0.6
 [v0.0.5]: https://github.com/leotorrealba/sprino/compare/v0.0.0...v0.0.5
