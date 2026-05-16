@@ -185,6 +185,7 @@ import {
   IdempotencyConflictError,
   OperationExpiredError,
 } from '../../service/idempotency.ts';
+import { getMetrics } from '../../service/telemetry.ts';
 import { ZodError, z } from 'zod';
 
 export function buildHttpRoutes(): Hono<AuthEnv> {
@@ -314,6 +315,11 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
       return actorErrorResponse(c, err);
     }
   });
+
+  // ── Telemetry ─────────────────────────────────────────────────────────────
+  // Returns current in-memory counters. Auth required (same Bearer as all
+  // /api/* routes). No workspace context needed.
+  api.get('/metrics', (c) => c.json(getMetrics(), 200));
 
   // ── Workspace-scoped sub-router (workspaceAuth required) ─────────────────
   const ws = new Hono<AuthEnv>();

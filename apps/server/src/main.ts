@@ -25,6 +25,7 @@ import { seedFromEnv } from './db/seed.ts';
 import { buildHttpRoutes } from './adapters/http/routes.ts';
 import { sseHandler } from './adapters/http/sse.ts';
 import { buildMcpRoutes } from './adapters/mcp/server.ts';
+import { recordRequest } from './service/telemetry.ts';
 
 async function buildApp(): Promise<Hono<AuthEnv>> {
   // Reconcile env-seeded actors + tokens with the DB. Idempotent: safe to
@@ -36,6 +37,17 @@ async function buildApp(): Promise<Hono<AuthEnv>> {
   app.use('*', async (c, next) => {
     c.set('db', db);
     await next();
+  });
+
+  // Telemetry middleware: record timing + status for every request except
+  // /healthz (liveness probe noise drowns signal in production).
+  app.use('*', async (c, next) => {
+    const start = Date.now();
+    await next();
+    const path = new URL(c.req.url).pathname;
+    if (path !== '/healthz') {
+      recordRequest(c.req.method, path, c.res.status, Date.now() - start);
+    }
   });
 
   app.get('/healthz', (c) =>

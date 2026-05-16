@@ -160,6 +160,7 @@ import {
   resolveWorkspaceById,
   resolveWorkspaceForActor,
 } from '../../service/workspaces.ts';
+import { recordMcpTool } from '../../service/telemetry.ts';
 
 type Env = AuthEnv;
 
@@ -890,10 +891,17 @@ export function buildMcpRoutes(): Hono<Env> {
     }
 
     const id = rpc.id ?? null;
+    // Extract tool name for telemetry (only set for tools/call).
+    const toolName =
+      rpc.method === 'tools/call'
+        ? String((rpc.params as { name?: unknown } | undefined)?.name ?? 'unknown')
+        : undefined;
     try {
       const result = await dispatch(c, rpc);
+      if (toolName !== undefined) recordMcpTool(toolName, true);
       return c.json({ jsonrpc: '2.0', id, result } satisfies JsonRpcResponse);
     } catch (err) {
+      if (toolName !== undefined) recordMcpTool(toolName, false);
       return c.json(translateError(id, err));
     }
   });
