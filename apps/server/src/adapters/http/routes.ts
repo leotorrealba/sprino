@@ -124,7 +124,6 @@ import {
   resolveWorkspaceById,
 } from '../../service/workspaces.ts';
 import {
-  assertAuditExportEnabled,
   getWorkspacePlan,
 } from '../../service/entitlements.ts';
 import {
@@ -639,7 +638,6 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
-      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,
@@ -665,7 +663,6 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
         limit: c.req.query('limit'),
         offset: c.req.query('offset'),
       });
-      await assertAuditExportEnabled(c.get('db'), c.get('workspace')!.id);
       const res = await exportAuditEvents(c.get('db'), {
         workspaceId: c.get('workspace')!.id,
         actorId: q.actorId,

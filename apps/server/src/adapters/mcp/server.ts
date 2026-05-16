@@ -145,7 +145,6 @@ import {
 } from '../../service/actors.ts';
 import { AuthorizationForbiddenError } from '../../service/authorization.ts';
 import { exportAuditEvents } from '../../service/audit-export.ts';
-import { assertAuditExportEnabled } from '../../service/entitlements.ts';
 import {
   WorkspaceNotFoundError,
   WorkspaceSlugConflictError,
@@ -1274,7 +1273,6 @@ async function callTool(
       if (!member) {
         throw new RpcMethodError(-32003, 'forbidden');
       }
-      await assertAuditExportEnabled(db, parsed.workspaceId);
       const res = await exportAuditEvents(db, {
         workspaceId: parsed.workspaceId,
         actorId: parsed.actorId,

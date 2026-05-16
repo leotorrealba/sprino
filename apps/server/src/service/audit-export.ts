@@ -5,6 +5,7 @@ import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { actors, events, projects, tasks } from '../db/schema.ts';
 import type { EventKind, EventWithActor } from '../domain/index.ts';
+import { assertAuditExportEnabled } from './entitlements.ts';
 
 export async function exportAuditEvents(
   db: Db,
@@ -18,6 +19,7 @@ export async function exportAuditEvents(
     offset?: number;
   },
 ): Promise<{ events: EventWithActor[]; total: number }> {
+  await assertAuditExportEnabled(db, opts.workspaceId);
   const limit = Math.min(opts.limit ?? 100, 500);
   const offset = opts.offset ?? 0;
 

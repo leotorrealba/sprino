@@ -76,8 +76,25 @@ async function seedActorInWorkspace(
 
 describe('audit export (E2-P2)', () => {
   describe('exportAuditEvents', () => {
+    beforeEach(async () => {
+      await db.insert(workspacePlans).values({
+        workspaceId: FIXTURE_WORKSPACE_ID,
+        plan: 'free',
+        maxProjects: 10,
+        maxMembers: 10,
+        auditExportEnabled: true,
+      });
+    });
+
     it('returns only events for workspace (isolation)', async () => {
       const wsB = await seedWorkspace({ slug: 'audit-ws-b' });
+      await db.insert(workspacePlans).values({
+        workspaceId: wsB,
+        plan: 'free',
+        maxProjects: 10,
+        maxMembers: 10,
+        auditExportEnabled: true,
+      });
       const projB = await seedProjectInWorkspace(wsB);
       const { actorId: actorB } = await seedActorInWorkspace(wsB);
 

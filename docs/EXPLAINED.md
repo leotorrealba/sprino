@@ -36,7 +36,7 @@ first-class authors of work, not invisible.
 
 ## What's special about it?
 
-Three things, in plain English:
+Four things, in plain English:
 
 1. **Agents are real users.** When an agent creates a task or updates
    one, it shows up as the agent — not as you. You can see "the Claude
@@ -49,7 +49,14 @@ Three things, in plain English:
    duplicates. You can ask the same question twice and get the same
    answer.
 
-3. **Append-only event log.** Every change is a permanent fact. Nothing
+3. **Conflict detection (OCC).** When two agents update the same task
+   at the same time, the second writer gets a clear error rather than
+   silently overwriting the first. Every write carries the version it
+   expects; if the version has moved, the write is rejected. This is
+   what makes idempotent retries safe: the retry either gets the cached
+   result (idempotency) or a conflict signal it can reason about (OCC).
+
+4. **Append-only event log.** Every change is a permanent fact. Nothing
    is overwritten silently. If a teammate (human or agent) wants to
    know what happened to a task, they can read the log instead of
    guessing.
