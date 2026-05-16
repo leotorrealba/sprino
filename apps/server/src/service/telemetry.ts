@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sprino — reference implementation of Tessera
-/**
- * Telemetry service — in-memory counters and structured request logging.
- *
- * No external dependencies. All counters are module-level state.
- * Use resetMetrics() in tests to keep runs isolated.
- *
- * Emitted log line shape (stdout, JSON):
- *   { ts, method, path, status, duration_ms }
- */
 
 export interface TelemetrySnapshot {
   requests_total: number;
@@ -25,10 +16,6 @@ let errorsTotal = 0;
 let mcpCallsTotal = 0;
 let mcpErrorsTotal = 0;
 
-/**
- * Record a single HTTP request. Appends a structured log line to stdout
- * and increments the relevant counters.
- */
 export function recordRequest(
   method: string,
   path: string,
@@ -55,21 +42,13 @@ export function recordRequest(
   );
 }
 
-/**
- * Record an MCP tool call result.
- */
-export function recordMcpTool(toolName: string, ok: boolean): void {
+export function recordMcpTool(_toolName: string, ok: boolean): void {
   mcpCallsTotal += 1;
   if (!ok) {
     mcpErrorsTotal += 1;
   }
-  void toolName; // recorded in future structured log if needed
 }
 
-/**
- * Return a snapshot of all current counters.
- * The returned object is a deep copy — mutations do not affect internal state.
- */
 export function getMetrics(): TelemetrySnapshot {
   return {
     requests_total: requestsTotal,
@@ -80,9 +59,6 @@ export function getMetrics(): TelemetrySnapshot {
   };
 }
 
-/**
- * Reset all counters to zero. Used in tests to keep runs isolated.
- */
 export function resetMetrics(): void {
   requestsTotal = 0;
   for (const key of Object.keys(requestsByStatus)) {

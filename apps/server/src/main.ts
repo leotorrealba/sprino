@@ -43,10 +43,15 @@ async function buildApp(): Promise<Hono<AuthEnv>> {
   // /healthz (liveness probe noise drowns signal in production).
   app.use('*', async (c, next) => {
     const start = Date.now();
-    await next();
-    const path = new URL(c.req.url).pathname;
-    if (path !== '/healthz') {
-      recordRequest(c.req.method, path, c.res.status, Date.now() - start);
+    let status = 500;
+    try {
+      await next();
+      status = c.res.status;
+    } finally {
+      const path = new URL(c.req.url).pathname;
+      if (path !== '/healthz') {
+        recordRequest(c.req.method, path, status, Date.now() - start);
+      }
     }
   });
 

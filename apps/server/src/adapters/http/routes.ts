@@ -319,6 +319,7 @@ export function buildHttpRoutes(): Hono<AuthEnv> {
   // ── Telemetry ─────────────────────────────────────────────────────────────
   // Returns current in-memory counters. Auth required (same Bearer as all
   // /api/* routes). No workspace context needed.
+  // Any authenticated actor may read metrics — counters are low-sensitivity pre-alpha diagnostics.
   api.get('/metrics', (c) => c.json(getMetrics(), 200));
 
   // ── Workspace-scoped sub-router (workspaceAuth required) ─────────────────

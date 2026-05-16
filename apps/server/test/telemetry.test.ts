@@ -115,26 +115,3 @@ describe('GET /api/metrics', () => {
     expect(res.status).toBe(401);
   });
 });
-
-describe('request middleware integration', () => {
-  it('a real HTTP request through buildTestApp increments requests_total', async () => {
-    const app = buildTestApp();
-
-    // Baseline counters are zero (reset in beforeEach).
-    const before = getMetrics().requests_total;
-
-    await app.fetch(
-      new Request('http://localhost/api/metrics', {
-        headers: { Authorization: `Bearer ${FIXTURE_TOKEN}` },
-      }),
-    );
-
-    // buildTestApp does NOT include the telemetry middleware (that's in
-    // main.ts/buildApp). This test verifies the counter from the test above
-    // did NOT accidentally bleed across; it also documents the boundary:
-    // telemetry middleware is wired in buildApp, not buildTestApp.
-    //
-    // If a future PR wires it into buildTestApp too, this test will still pass.
-    expect(getMetrics().requests_total).toBeGreaterThanOrEqual(before);
-  });
-});
