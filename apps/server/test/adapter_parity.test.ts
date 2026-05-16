@@ -8,7 +8,7 @@
  * If a verb starts diverging (e.g. a field present in HTTP but missing in MCP,
  * or an error code that differs), this test breaks before users notice.
  *
- * Verbs covered: task.create, task.get, task.update_status
+ * Verbs covered: task.create, task.update_status
  */
 
 import { v7 as uuidv7 } from 'uuid';
@@ -63,7 +63,9 @@ function mcpCall(
 
 /**
  * Assert that two task shapes have the same field keys and compatible types.
- * Ignores volatile values (id, timestamps) — those differ legitimately.
+ * Skips id and timestamp fields: those differ legitimately between calls
+ * (different ids, different creation times), so comparing their values or
+ * types would produce false negatives for correct parity.
  */
 function assertTaskShapeParity(
   httpTask: Record<string, unknown>,
@@ -90,6 +92,13 @@ function assertEventShapeParity(
   const httpKeys = Object.keys(httpEvent).sort();
   const mcpKeys = Object.keys(mcpEvent).sort();
   expect(mcpKeys, `${label}: MCP event missing fields vs HTTP`).toEqual(httpKeys);
+
+  for (const key of httpKeys) {
+    if (['id', 'occurred_at', 'created_at'].includes(key)) continue;
+    expect(typeof mcpEvent[key], `${label}: event field '${key}' type mismatch`).toBe(
+      typeof httpEvent[key],
+    );
+  }
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────
@@ -212,7 +221,7 @@ describe('dual-adapter parity (HTTP vs MCP)', () => {
     expect(mcpUpdateBody.result.structuredContent.event.kind).toBe('status_changed');
   });
 
-  it('task.create OCC 409: HTTP and MCP use the same error envelope shape', async () => {
+  it('task.update_status OCC: HTTP returns 409 and MCP returns a JSON-RPC error with the same version_mismatch message', async () => {
     const app = buildTestApp();
 
     const createRes = await httpCreate(app, {
@@ -255,7 +264,8 @@ describe('dual-adapter parity (HTTP vs MCP)', () => {
     const mcpOccBody = (await mcpOccRes.json()) as {
       error: { code: number; message: string };
     };
-    // MCP surfaces as JSON-RPC error with the same semantic message
+    // MCP surfaces as JSON-RPC error; same semantic message, numeric error code
     expect(mcpOccBody.error.message).toBe('version_mismatch');
+    expect(typeof mcpOccBody.error.code).toBe('number');
   });
 });

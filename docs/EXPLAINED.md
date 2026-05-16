@@ -51,10 +51,11 @@ Four things, in plain English:
 
 3. **Conflict detection (OCC).** When two agents update the same task
    at the same time, the second writer gets a clear error rather than
-   silently overwriting the first. Every write carries the version it
-   expects; if the version has moved, the write is rejected. This is
-   what makes idempotent retries safe: the retry either gets the cached
-   result (idempotency) or a conflict signal it can reason about (OCC).
+   silently overwriting the first. Status updates that include an
+   expected version (`if_match`) are rejected if the version has moved.
+   This is what makes idempotent retries safe: the retry either gets the
+   cached result (idempotency) or a conflict signal it can reason about
+   (OCC).
 
 4. **Append-only event log.** Every change is a permanent fact. Nothing
    is overwritten silently. If a teammate (human or agent) wants to
