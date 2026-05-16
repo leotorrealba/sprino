@@ -316,7 +316,14 @@ TEST_DATABASE_URL=postgres://sprino:sprino@localhost:5433/sprino_test \
 bun run test
 ```
 
-Current state: 9 test files, 82 tests, all passing.
+Current state: 406 tests across all test files, all passing.
+
+Run the Tessera conformance suite specifically:
+
+```sh
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
+  bun --filter '@sprino/server' test test/conformance.test.ts
+```
 
 ---
 
@@ -336,6 +343,77 @@ ask: **would a second implementer also need to make the same decision?**
 If you find yourself wanting to relax a Tessera rule to fit a Sprino
 constraint, you are working at the wrong layer — open an issue on Tessera
 instead.
+
+---
+
+## 9b. Tessera integration profile
+
+Sprino implements **Tessera v0.1.5** in full. The table below lists every
+supported verb with its HTTP surface and MCP tool name. 406 tests pass
+against a real Postgres instance, including `conformance.test.ts` which
+replays the Tessera v0.1.5 fixture files from `../tessera/conformance/fixtures/`.
+
+### Tessera v0.1.5 verbs (full conformance)
+
+| Verb | HTTP | MCP tool |
+|------|------|----------|
+| `task.create` | `POST /api/tasks` | `sprino.task.create` |
+| `task.get` | `GET /api/tasks/:id` | `sprino.task.get` |
+| `task.list` | `GET /api/tasks` | — |
+| `task.update_status` | `PATCH /api/tasks/:id/status` | `sprino.task.update_status` |
+| `task.update` | `PATCH /api/tasks/:id` | `sprino.task.update` |
+| `event.list` | `GET /api/events` | — |
+| `project.list` | `GET /api/projects` | `sprino.project.list` |
+| `project.get` | `GET /api/projects/:id` | `sprino.project.get` |
+| `project.create` | `POST /api/projects` | `sprino.project.create` |
+| `actor.register` | `POST /api/actors` | `sprino.actor.register` |
+| `actor.list` | `GET /api/actors` | `sprino.actor.list` |
+| `actor.get` | `GET /api/actors/:id` | `sprino.actor.get` |
+| `actor.revoke_token` | `POST /api/actors/:id/revoke_token` | `sprino.actor.revoke_token` |
+| `actor.heartbeat` | `POST /api/actors/:id/heartbeat` | `sprino.actor.heartbeat` |
+| `actor.deactivate` | `POST /api/actors/:id/deactivate` | `sprino.actor.deactivate` |
+| `attachment.create_upload` | `POST /api/tasks/:id/attachments` | `sprino.attachment.create_upload` |
+| (PUT upload) | `PUT /api/attachments/:id/data` | (HTTP only) |
+| `attachment.finalize` | `POST /api/attachments/:id/finalize` | `sprino.attachment.finalize` |
+| `attachment.get` | `GET /api/attachments/:id` | `sprino.attachment.get` |
+| `attachment.list` | `GET /api/tasks/:id/attachments` | `sprino.attachment.list` |
+
+> **Note on `parent_task_id`:** the Tessera v0.1.5 task schema includes a
+> `parent_task_id` field. The full hierarchy service — multi-level nesting,
+> dependency edges, and cycle detection — is a Sprino extension beyond that
+> schema field (see below).
+
+### Sprino extensions (not in the Tessera spec)
+
+These capabilities are Sprino-specific and not part of the Tessera protocol.
+A second Tessera implementer is under no obligation to provide them.
+
+| Extension | HTTP | MCP tool |
+|-----------|------|----------|
+| Workflow state machine | `POST /api/tasks/:id/transition` | `sprino.task.transition_workflow` |
+| Task reorder | `POST /api/tasks/:id/reorder` | — |
+| Task hierarchy | `PATCH /api/tasks/:id/parent` | — |
+| Task dependencies | `POST /api/tasks/:id/dependencies`, `DELETE /api/tasks/:id/dependencies` | — |
+| Sprint CRUD | `POST /api/projects/:id/sprints`, `GET /api/projects/:id/sprints`, `GET /api/sprints/:id`, `PATCH /api/sprints/:id/status`, `POST /api/sprints/:id/tasks`, `DELETE /api/sprints/:id/tasks/:taskId` | — |
+| Saved views | `POST /api/projects/:id/saved-views` | — |
+| Automation rules | `POST /api/projects/:id/automation-rules` | — |
+| Workspace management | `GET /api/workspaces`, `POST /api/workspaces` | `sprino.workspace.list`, `sprino.workspace.get`, `sprino.workspace.member.list` |
+| Audit export | `GET /api/audit/export`, `GET /api/audit/export/csv` | `audit.export` |
+
+### Conformance testing
+
+```sh
+# Full test suite (requires a running Postgres)
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
+  bun run test
+
+# Tessera conformance fixtures only
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
+  bun --filter '@sprino/server' test test/conformance.test.ts
+```
+
+The Tessera spec and conformance fixtures live in the sibling repo
+`../tessera/` (MIT-licensed, separate from this AGPL codebase).
 
 ---
 
@@ -559,6 +637,80 @@ safe-by-default while leaving room for paid tiers.
 
 Full rationale, edge cases, and test notes: [ADR 0001](./adr/0001-e1-e2-e3-workspace-audit-entitlements.md)
 (which also summarizes **E1** workspace auth and **E2** export isolation for cross-reference).
+
+---
+
+## 10g. Observability (E4)
+
+### In-memory telemetry
+
+`apps/server/src/service/telemetry.ts` maintains a process-local metrics
+store that is reset on every server restart. It tracks:
+
+- **`requests_total`** — total request count across all routes.
+- **`requests_by_status`** — count keyed by status bucket: `"2xx"`, `"3xx"`,
+  `"4xx"`, `"5xx"`.
+- **`errors_total`** — count of 5xx responses (subset of `requests_total`).
+- **`mcp_calls_total`** — count of MCP tool calls.
+- **`mcp_errors_total`** — count of MCP tool call errors.
+
+Each request also writes a structured JSON log line to stdout:
+`{ ts, method, path, status, duration_ms }`.
+
+The telemetry middleware in `main.ts` feeds every request except `/healthz`
+(liveness-probe noise would drown signal in production).
+
+### Reading metrics
+
+```sh
+curl -s http://localhost:3001/api/metrics \
+  -H "Authorization: Bearer $SPRINO_ADMIN_TOKEN" | jq
+```
+
+Returns a JSON snapshot of all counters. Requires a valid Bearer token
+(token-authenticated; does not require a workspace header).
+
+### Running the smoke-check script
+
+The smoke-check script can be run against a running Sprino server to assert
+SLO compliance:
+
+```sh
+SERVER_URL=http://localhost:3001 BEARER_TOKEN=<admin-token> \
+  bun run apps/server/scripts/smoke-check.ts
+```
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SERVER_URL` | `http://localhost:3001` | Base URL of the target server |
+| `BEARER_TOKEN` | (unset) | Admin token; if missing, authenticated checks are skipped with a warning |
+| `WORKSPACE_ID` | (unset) | Sent as `X-Workspace-ID` on authenticated calls; required for multi-workspace deploys |
+
+### SLOs asserted
+
+| Endpoint | Assertion |
+| --- | --- |
+| `GET /healthz` | HTTP 200, `ok: true`, `version` and `protocol` fields present, response < **500 ms** |
+| `GET /api/projects` | HTTP 200, response < **1000 ms** |
+
+### Docker-level smoke test
+
+For Docker Compose stacks, `scripts/smoke.sh` runs a curl-based health loop
+that waits for the server to become reachable and then makes the same
+`/healthz` assertion. It is complementary to the programmatic script above:
+`smoke.sh` is used inside `docker-compose --profile full up` to gate
+dependent services; `smoke-check.ts` is used in CI post-deploy pipelines and
+local release checklists.
+
+### Limitations
+
+Telemetry is **in-memory only** — it resets on restart and is not shared
+across instances. This is intentional for pre-alpha: the goal is quick
+diagnostics on a single-node deploy, not production-grade APM. Persistent
+metrics (Prometheus scrape endpoint, multi-instance aggregation) are deferred
+to a future release.
 
 ---
 

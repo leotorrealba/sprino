@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. Latest release: [**v0.2.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.2.0) — multi-workspace tenancy (E1–E3), workflow/board/sprint/search features (D1–D5), `task.update` verb (G2), MCP workspace tools (G1), and Docker smoke CI (G3).
+**Status:** pre-alpha. Active development. Latest release: [**v0.3.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.3.0) — observability layer (E4: in-process telemetry counters, SLO smoke-check script), release tooling (E5: release-gate checklist, Tessera integration profile in TECHNICAL.md), and Phase E completion (E1–E5 closed).
 
 ## Why
 
@@ -43,6 +43,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.0.9** (phase 9) — Tessera v0.1.2 actor lifecycle: `actor.register` / `list` / `get` / `revoke_token` verbs, in-app Members tab with rotate/revoke, two-source actor model (env + db) with break-glass recovery, single-SQL auth path, race-safe rotate
 - **v0.1.0** ✅ shipped — Tessera v0.1.5 full surface: agent registration and session lifecycle (`actor.heartbeat`, `actor.deactivate`), attachment upload lifecycle (create_upload → PUT → finalize), project creation (`project.create`, slug uniqueness), frontend attachment UI, keyboard-accessible task cards. All 16 Tessera verbs implemented; 233+ conformance tests pass.
 - **v0.2.0** ✅ shipped — Multi-workspace tenancy (E1–E3): workspace isolation, audit log + export, entitlements. Workflow/board/sprint/search (D1–D5): state machine, Kanban ordering, hierarchy + deps, sprint planning, saved views + automation. Gap-series: `task.update` verb (G2), MCP workspace tools (G1), Docker smoke CI validating self-host end-to-end (G3).
+- **v0.3.0** ✅ shipped — Observability (E4): in-process telemetry counters (`requests_total`, `errors_total`, `mcp_calls_total`), `GET /api/metrics` endpoint, SLO smoke-check script. Release tooling (E5): `scripts/release-checklist.sh` (7-gate POSIX release gate), Tessera v0.1.5 integration profile in TECHNICAL.md, EXPLAINED.md + git-workflow.md freshness pass. Phase E (E1–E5) complete.
 
 ## Self-host (30 minutes, end-to-end)
 
@@ -56,6 +57,12 @@ git clone https://github.com/leotorrealba/sprino.git
 cd sprino
 sh bootstrap.sh                       # generates .env with random secrets
 docker compose --profile full up -d   # build + start postgres + server + web + backup sidecar
+```
+
+After the stack is up, verify end-to-end health:
+
+```sh
+sh scripts/smoke.sh
 ```
 
 When `bootstrap.sh` finishes it prints your admin token. Open
@@ -98,6 +105,12 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
   `enforce_admins` escape hatch.
 
 This is pre-alpha active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening.
+
+## Known limitations
+
+- **Token rotation (db-source actors):** rotate in-app via the Members tab — no restart required.
+- **Token rotation (env-source actors):** update `SPRINO_ACTORS_JSON` in `.env` and run `docker compose up -d --force-recreate server`. The new token is active immediately; the old one is revoked.
+- SSE realtime is implemented; LISTEN/NOTIFY (push-based streaming) is deferred to a future release.
 
 ## License
 
