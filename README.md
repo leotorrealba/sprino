@@ -97,7 +97,7 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
   branch protection, conversation-resolution gating, the
   `enforce_admins` escape hatch.
 
-Until v0.1, this is private active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening this quarter.
+This is pre-alpha active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening.
 
 ## License
 
