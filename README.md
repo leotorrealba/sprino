@@ -4,7 +4,7 @@
 >
 > Reference implementation of the [Tessera protocol](https://github.com/leotorrealba/tessera).
 
-**Status:** pre-alpha. Active development. Latest release: [**v0.3.0**](https://github.com/leotorrealba/sprino/releases/tag/v0.3.0) — observability layer (E4: in-process telemetry counters, SLO smoke-check script), release tooling (E5: release-gate checklist, Tessera integration profile in TECHNICAL.md), and Phase E completion (E1–E5 closed).
+**Status:** pre-alpha. Active development. Latest release: [**v0.3.1**](https://github.com/leotorrealba/sprino/releases/tag/v0.3.1) — audit-export guard consolidated into the service layer, dual-adapter HTTP/MCP parity test, OCC docs precision fix, Docker-smoke CI path-filter correction.
 
 ## Why
 
@@ -44,6 +44,7 @@ This repo is currently the AGPL placeholder for the v1 PoC build. Phase-by-phase
 - **v0.1.0** ✅ shipped — Tessera v0.1.5 full surface: agent registration and session lifecycle (`actor.heartbeat`, `actor.deactivate`), attachment upload lifecycle (create_upload → PUT → finalize), project creation (`project.create`, slug uniqueness), frontend attachment UI, keyboard-accessible task cards. All 16 Tessera verbs implemented; 233+ conformance tests pass.
 - **v0.2.0** ✅ shipped — Multi-workspace tenancy (E1–E3): workspace isolation, audit log + export, entitlements. Workflow/board/sprint/search (D1–D5): state machine, Kanban ordering, hierarchy + deps, sprint planning, saved views + automation. Gap-series: `task.update` verb (G2), MCP workspace tools (G1), Docker smoke CI validating self-host end-to-end (G3).
 - **v0.3.0** ✅ shipped — Observability (E4): in-process telemetry counters (`requests_total`, `errors_total`, `mcp_calls_total`), `GET /api/metrics` endpoint, SLO smoke-check script. Release tooling (E5): `scripts/release-checklist.sh` (7-gate POSIX release gate), Tessera v0.1.5 integration profile in TECHNICAL.md, EXPLAINED.md + git-workflow.md freshness pass. Phase E (E1–E5) complete.
+- **v0.3.1** ✅ shipped — Architecture fix: audit-export entitlement guard consolidated into the service layer (single enforcement point for HTTP + MCP). Dual-adapter parity test added. OCC language in EXPLAINED.md made precise. Docker-smoke CI path filter corrected.
 
 ## Self-host (30 minutes, end-to-end)
 
