@@ -17,18 +17,18 @@
 import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import type { AuthEnv } from '../src/auth/middleware.ts';
+import { healthzHandler } from '../src/main.ts';
 
 /**
- * Minimal app with only the /healthz route — mirrors what main.ts mounts.
+ * Minimal app with only the /healthz route — imports the real handler from
+ * main.ts so any change to the production handler is caught here automatically.
  * We don't need buildTestApp() here because /healthz lives outside /api and
  * doesn't touch the database; a standalone Hono instance is sufficient and
  * avoids the beforeEach DB reset overhead.
  */
 function buildHealthzApp(): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
-  app.get('/healthz', (c) =>
-    c.json({ ok: true, version: '0.2.0', protocol: 'tessera/v0.1.5' }),
-  );
+  app.get('/healthz', healthzHandler);
   return app;
 }
 

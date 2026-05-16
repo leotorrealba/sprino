@@ -569,10 +569,15 @@ Full rationale, edge cases, and test notes: [ADR 0001](./adr/0001-e1-e2-e3-works
 `apps/server/src/service/telemetry.ts` maintains a process-local metrics
 store that is reset on every server restart. It tracks:
 
-- **Request counts** per `METHOD path` pair.
-- **Status buckets** — counts for `2xx`, `3xx`, `4xx`, `5xx` per route.
-- **MCP tool call counts** per tool name.
-- **Latency samples** (last-N ring buffer per route) for P50/P95 estimation.
+- **`requests_total`** — total request count across all routes.
+- **`requests_by_status`** — count keyed by status bucket: `"2xx"`, `"3xx"`,
+  `"4xx"`, `"5xx"`.
+- **`errors_total`** — count of 5xx responses (subset of `requests_total`).
+- **`mcp_calls_total`** — count of MCP tool calls.
+- **`mcp_errors_total`** — count of MCP tool call errors.
+
+Each request also writes a structured JSON log line to stdout:
+`{ ts, method, path, status, duration_ms }`.
 
 The telemetry middleware in `main.ts` feeds every request except `/healthz`
 (liveness-probe noise would drown signal in production).
@@ -584,8 +589,8 @@ curl -s http://localhost:3001/api/metrics \
   -H "Authorization: Bearer $SPRINO_ADMIN_TOKEN" | jq
 ```
 
-Returns a JSON snapshot of all counters and latency buckets. Requires a
-valid Bearer token (workspace-scoped endpoint on the `/api` router).
+Returns a JSON snapshot of all counters. Requires a valid Bearer token
+(workspace-scoped endpoint on the `/api` router).
 
 ### Running the smoke-check script
 

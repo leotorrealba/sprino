@@ -18,6 +18,7 @@
 
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { tokenAuth } from './auth/middleware.ts';
 import type { AuthEnv } from './auth/middleware.ts';
 import { db, closeDb } from './db/client.ts';
@@ -26,6 +27,10 @@ import { buildHttpRoutes } from './adapters/http/routes.ts';
 import { sseHandler } from './adapters/http/sse.ts';
 import { buildMcpRoutes } from './adapters/mcp/server.ts';
 import { recordRequest } from './service/telemetry.ts';
+
+export function healthzHandler(c: Context): Response {
+  return c.json({ ok: true, version: '0.2.0', protocol: 'tessera/v0.1.5' });
+}
 
 async function buildApp(): Promise<Hono<AuthEnv>> {
   // Reconcile env-seeded actors + tokens with the DB. Idempotent: safe to
@@ -55,9 +60,7 @@ async function buildApp(): Promise<Hono<AuthEnv>> {
     }
   });
 
-  app.get('/healthz', (c) =>
-    c.json({ ok: true, version: '0.2.0', protocol: 'tessera/v0.1.5' }),
-  );
+  app.get('/healthz', healthzHandler);
 
   // /api/events/stream — SSE feed. Mounted DIRECTLY on the app (NOT under
   // the `api` router) so it bypasses the global Bearer middleware. Auth is
