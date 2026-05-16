@@ -321,7 +321,7 @@ Current state: 406 tests across all test files, all passing.
 Run the Tessera conformance suite specifically:
 
 ```sh
-env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
   bun --filter '@sprino/server' test test/conformance.test.ts
 ```
 
@@ -404,11 +404,11 @@ A second Tessera implementer is under no obligation to provide them.
 
 ```sh
 # Full test suite (requires a running Postgres)
-env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
   bun run test
 
 # Tessera conformance fixtures only
-env TEST_DATABASE_URL=postgres://leotorrealba@localhost:5432/sprino_test \
+env TEST_DATABASE_URL=postgres://youruser@localhost:5432/sprino_test \
   bun --filter '@sprino/server' test test/conformance.test.ts
 ```
 
@@ -672,7 +672,7 @@ Returns a JSON snapshot of all counters. Requires a valid Bearer token
 
 ### Running the smoke-check script
 
-The smoke-check script can be run against any live Sprino server to assert
+The smoke-check script can be run against a running Sprino server to assert
 SLO compliance:
 
 ```sh
@@ -686,6 +686,7 @@ Environment variables:
 | --- | --- | --- |
 | `SERVER_URL` | `http://localhost:3001` | Base URL of the target server |
 | `BEARER_TOKEN` | (unset) | Admin token; if missing, authenticated checks are skipped with a warning |
+| `WORKSPACE_ID` | (unset) | Sent as `X-Workspace-ID` on authenticated calls; required for multi-workspace deploys |
 
 ### SLOs asserted
 
@@ -709,7 +710,7 @@ Telemetry is **in-memory only** — it resets on restart and is not shared
 across instances. This is intentional for pre-alpha: the goal is quick
 diagnostics on a single-node deploy, not production-grade APM. Persistent
 metrics (Prometheus scrape endpoint, multi-instance aggregation) are deferred
-to v0.3.
+to a future release.
 
 ---
 

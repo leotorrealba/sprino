@@ -72,6 +72,7 @@ export function resetMetrics(): void {
 function statusBucket(status: number): string {
   if (status >= 500) return '5xx';
   if (status >= 400) return '4xx';
+  if (status >= 300) return '3xx';
   if (status >= 200) return '2xx';
   return `${Math.floor(status / 100)}xx`;
 }

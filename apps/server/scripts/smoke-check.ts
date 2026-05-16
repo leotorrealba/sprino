@@ -15,6 +15,7 @@
  * Defaults:
  *   SERVER_URL   — http://localhost:3001 (if unset)
  *   BEARER_TOKEN — (if unset, authenticated checks are skipped with a warning)
+ *   WORKSPACE_ID — (if set, sent as X-Workspace-ID header on authenticated calls)
  *
  * Exit codes:
  *   0  all checks passed
@@ -26,6 +27,7 @@ export {};
 
 const SERVER_URL = process.env.SERVER_URL ?? 'http://localhost:3001';
 const BEARER_TOKEN = process.env.BEARER_TOKEN ?? '';
+const WORKSPACE_ID = process.env.WORKSPACE_ID ?? '';
 
 let allPassed = true;
 
@@ -167,9 +169,11 @@ async function checkProjectsList(): Promise<void> {
   let durationMs = 0;
 
   try {
-    const result = await httpGet(`${SERVER_URL}/api/projects`, {
+    const headers: Record<string, string> = {
       Authorization: `Bearer ${BEARER_TOKEN}`,
-    });
+    };
+    if (WORKSPACE_ID) headers['X-Workspace-ID'] = WORKSPACE_ID;
+    const result = await httpGet(`${SERVER_URL}/api/projects`, headers);
     status = result.status;
     durationMs = result.durationMs;
 

@@ -331,7 +331,7 @@ sh scripts/smoke.sh
 ```
 
 `smoke.sh` spins up the full `docker-compose` stack, waits for the server to
-become healthy, hits `/health`, and tears down. A passing smoke run is the
+become healthy, hits `/healthz`, and tears down. A passing smoke run is the
 final signal that the release is shippable.
 
 ### Phase E milestone
