@@ -119,6 +119,15 @@ docker compose exec postgres psql -U sprino -d sprino_dev -c \
 
 Numbers should match what you remember from before the restore.
 
+For a full end-to-end health check of the stack after restore, run:
+
+```sh
+SERVER_URL=http://localhost:3001 BEARER_TOKEN=<token> bun run apps/server/scripts/smoke-check.ts
+```
+
+Replace `<token>` with your admin bearer token. A clean run means the API,
+database, and auth path are all healthy.
+
 ## Frequently encountered errors
 
 | Error | Cause | Fix |

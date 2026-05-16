@@ -58,6 +58,12 @@ sh bootstrap.sh                       # generates .env with random secrets
 docker compose --profile full up -d   # build + start postgres + server + web + backup sidecar
 ```
 
+After the stack is up, verify end-to-end health:
+
+```sh
+sh scripts/smoke.sh
+```
+
 When `bootstrap.sh` finishes it prints your admin token. Open
 <http://localhost:3000>, paste the name and token, and create your
 first task. The server is at <http://localhost:3001> if you want to
@@ -98,6 +104,12 @@ docker compose --profile full down -v    # stop, wipe Postgres volume
   `enforce_admins` escape hatch.
 
 This is pre-alpha active development. If you're curious about the project, watch the repo and follow the [Tessera spec](https://github.com/leotorrealba/tessera) — the protocol's evolution is where the interesting work is happening.
+
+## Known limitations
+
+- **Token rotation (db-source actors):** rotate in-app via the Members tab — no restart required.
+- **Token rotation (env-source actors):** update `SPRINO_ACTORS_JSON` in `.env` and run `docker compose up -d --force-recreate server`. The new token is active immediately; the old one is revoked.
+- SSE realtime is implemented; LISTEN/NOTIFY is deferred to v0.3.
 
 ## License
 
