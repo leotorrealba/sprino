@@ -929,6 +929,11 @@ async function resolveWorkspaceForMcp(
   }
   const resolution = await resolveWorkspaceForActor(db, actorId);
   if (resolution.kind === 'resolved') return resolution.workspaceId;
+  if (resolution.kind === 'none') {
+    throw new RpcMethodError(-32003, 'no_workspace_membership', {
+      hint: 'This actor is not a member of any workspace. Ask a workspace admin to add you via sprino.workspace.member.add.',
+    });
+  }
   throw new RpcMethodError(-32003, 'workspace_id_required', {
     hint: 'Call sprino.workspace.list to get your workspace IDs, then pass workspace_id in tool arguments.',
   });

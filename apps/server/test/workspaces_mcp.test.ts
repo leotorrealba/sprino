@@ -144,6 +144,21 @@ describe('MCP workspace resolution', () => {
     expect(body.error!.code).toBe(-32003);
     expect(body.error!.message).toBe('workspace_not_found_or_not_member');
   });
+
+  it('actor with zero workspace memberships → -32003 no_workspace_membership with hint', async () => {
+    const app = buildTestApp();
+    const { token } = await seedActorWithNoWorkspace();
+
+    const res = await app.fetch(mcpCall(token, 'sprino.project.list', {}));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      error?: { code: number; message: string; data?: { hint: string } };
+    };
+    expect(body.error).toBeDefined();
+    expect(body.error!.code).toBe(-32003);
+    expect(body.error!.message).toBe('no_workspace_membership');
+    expect(body.error!.data?.hint).toContain('workspace admin');
+  });
 });
 
 describe('MCP sprino.workspace.list', () => {
